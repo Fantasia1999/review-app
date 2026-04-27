@@ -12,6 +12,7 @@ import {
 } from '@tanstack/react-query';
 import { api, apiPost, apiPut, apiPatch, apiDelete } from './client';
 import type {
+  CreateHostInput,
   HostConfig,
   DiffSummary,
   FileDiff,
@@ -30,7 +31,7 @@ export function useHosts() {
   return useQuery({
     queryKey: ['hosts'],
     queryFn: () =>
-      api<{ hosts: HostConfig[]; passphraseLoaded: string[] }>('/api/hosts'),
+      api<{ hosts: HostConfig[]; credentialLoaded: string[]; passphraseLoaded: string[] }>('/api/hosts'),
     staleTime: 60_000,
   });
 }
@@ -46,7 +47,7 @@ export function useLocalKeys() {
 export function useAddHost() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (host: Partial<HostConfig>) =>
+    mutationFn: (host: CreateHostInput) =>
       apiPost<{ host: HostConfig }>('/api/hosts', host),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
   });
@@ -68,6 +69,21 @@ export function useSubmitPassphrase() {
       apiPost<{ ok: true }>(
         `/api/hosts/${encodeURIComponent(alias)}/passphrase`,
         { passphrase },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hosts'] });
+      qc.invalidateQueries({ queryKey: ['changes'] });
+    },
+  });
+}
+
+export function useSubmitPassword() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ alias, password }: { alias: string; password: string }) =>
+      apiPost<{ ok: true }>(
+        `/api/hosts/${encodeURIComponent(alias)}/password`,
+        { password },
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['hosts'] });

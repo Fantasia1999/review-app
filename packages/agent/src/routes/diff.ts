@@ -92,8 +92,12 @@ function errorResponse(c: any, err: unknown) {
   if (err instanceof RemoteExecError) {
     const k = err.info.kind;
     let status: 400 | 401 | 404 | 500 = 400;
-    if (k === 'ssh_passphrase_required') status = 401;
-    else if (k === 'ssh_passphrase_wrong' || k === 'ssh_auth_failed') status = 401;
+    if (k === 'ssh_passphrase_required' || k === 'ssh_password_required') status = 401;
+    else if (
+      k === 'ssh_passphrase_wrong' ||
+      k === 'ssh_password_wrong' ||
+      k === 'ssh_auth_failed'
+    ) status = 401;
     else if (k === 'not_a_repo' || k === 'path_not_found') status = 404;
     return c.json({ error: err.info }, status);
   }

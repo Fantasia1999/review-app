@@ -7,6 +7,7 @@
  * DELETE /api/hosts/:alias         - remove host (also disconnects)
  * GET  /api/hosts/keys             - scan ~/.ssh/ for available private keys
  * POST /api/hosts/:alias/passphrase - submit passphrase for an encrypted key
+ * POST /api/hosts/:alias/password   - submit password for a password-auth SSH host
  * POST /api/hosts/:alias/test      - test connection (lightweight `echo ok`)
  */
 
@@ -15,7 +16,11 @@ import { loadConfig, updateConfig } from '../config/store';
 import { detectEncrypted, scanLocalKeys } from '../config/keys';
 import type { ExecutorPool } from '../remote/pool';
 import { RemoteExecError } from '../remote/executor';
-import type { HostConfig } from '@review-app/shared';
+import type {
+  CreateHostInput,
+  HostConfig,
+  SshHostConfig,
+} from '@review-app/shared';
 
 export function hostsRoutes(pool: ExecutorPool) {
   const r = new Hono();
@@ -24,9 +29,12 @@ export function hostsRoutes(pool: ExecutorPool) {
     const cfg = await loadConfig();
     return c.json({
       hosts: cfg.hosts,
-      // Tell client which hosts already have an in-memory passphrase
+      // Tell client which hosts already have an in-memory password/passphrase.
+      credentialLoaded: cfg.hosts
+        .filter((h) => hostNeedsCredential(h) && pool.hasCredential(h.alias))
+        .map((h) => h.alias),
       passphraseLoaded: cfg.hosts
-        .filter((h) => h.hasPassphrase && pool.hasPassphrase(h.alias))
+        .filter((h) => h.kind === 'ssh' && h.auth === 'key' && h.hasPassphrase && pool.hasPassphrase(h.alias))
         .map((h) => h.alias),
     });
   });
@@ -37,20 +45,10 @@ export function hostsRoutes(pool: ExecutorPool) {
   });
 
   r.post('/', async (c) => {
-    const body = (await c.req.json()) as Partial<HostConfig>;
-    if (!body.alias || !body.hostname || !body.user || !body.keyPath) {
-      return c.json({ error: 'alias, hostname, user, keyPath are required' }, 400);
-    }
-    // Auto-detect whether the key is encrypted - the client doesn't need to know.
-    const encrypted = await detectEncrypted(body.keyPath);
-    const newHost: HostConfig = {
-      alias: body.alias,
-      hostname: body.hostname,
-      user: body.user,
-      port: body.port ?? 22,
-      keyPath: body.keyPath,
-      hasPassphrase: encrypted,
-    };
+    const body = (await c.req.json()) as CreateHostInput;
+    const parsed = await parseCreateHost(body);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    const newHost = parsed.host;
     const existing = await loadConfig();
     if (existing.hosts.find((h) => h.alias === newHost.alias)) {
       return c.json(
@@ -61,43 +59,38 @@ export function hostsRoutes(pool: ExecutorPool) {
     const updated = await updateConfig((cfg) => {
       cfg.hosts.push(newHost);
     });
+    if (parsed.password) pool.setPassword(newHost.alias, parsed.password);
     return c.json({ host: newHost, hosts: updated.hosts });
   });
 
   r.put('/:alias', async (c) => {
     const alias = c.req.param('alias');
-    const body = (await c.req.json()) as Partial<HostConfig>;
+    const body = (await c.req.json()) as Partial<CreateHostInput> & { password?: string };
     const cfgPre = await loadConfig();
-    if (!cfgPre.hosts.find((h) => h.alias === alias)) {
+    const existingPre = cfgPre.hosts.find((h) => h.alias === alias);
+    if (!existingPre) {
       return c.json({ error: 'host not found' }, 404);
     }
+    const parsed = await parseUpdateHost(existingPre, body);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
     let resolved: HostConfig | null = null;
     await updateConfig(async (cfg) => {
       const idx = cfg.hosts.findIndex((h) => h.alias === alias);
       if (idx === -1) return;
-      const existing = cfg.hosts[idx];
-      const merged: HostConfig = {
-        ...existing,
-        ...body,
-        alias: existing.alias, // alias is immutable
-      };
-      // Re-detect passphrase if key changed
-      if (body.keyPath && body.keyPath !== existing.keyPath) {
-        merged.hasPassphrase = await detectEncrypted(body.keyPath);
-        pool.clearPassphrase(alias);
-      }
-      cfg.hosts[idx] = merged;
-      resolved = merged;
+      cfg.hosts[idx] = parsed.host;
+      resolved = parsed.host;
     });
     // Drop any active connection so the new config takes effect on next use
     await pool.disconnect(alias);
+    pool.clearCredential(alias);
+    if (parsed.password) pool.setPassword(alias, parsed.password);
     return c.json({ host: resolved });
   });
 
   r.delete('/:alias', async (c) => {
     const alias = c.req.param('alias');
     await pool.disconnect(alias);
-    pool.clearPassphrase(alias);
+    pool.clearCredential(alias);
     await updateConfig((cfg) => {
       cfg.hosts = cfg.hosts.filter((h) => h.alias !== alias);
       delete cfg.recentRepos[alias];
@@ -116,6 +109,15 @@ export function hostsRoutes(pool: ExecutorPool) {
     return c.json({ ok: true });
   });
 
+  r.post('/:alias/password', async (c) => {
+    const alias = c.req.param('alias');
+    const { password } = (await c.req.json()) as { password: string };
+    if (!password) return c.json({ error: 'password required' }, 400);
+    pool.setPassword(alias, password);
+    await pool.disconnect(alias);
+    return c.json({ ok: true });
+  });
+
   r.post('/:alias/test', async (c) => {
     const alias = c.req.param('alias');
     const cfg = await loadConfig();
@@ -123,10 +125,10 @@ export function hostsRoutes(pool: ExecutorPool) {
     if (!host) return c.json({ error: 'host not found' }, 404);
     try {
       const exec = pool.get(host);
-      const r = await exec.exec('echo ok && git --version', { timeoutMs: 10_000 });
+      const r = await exec.exec('git --version', { timeoutMs: 10_000 });
       return c.json({
         ok: true,
-        gitVersion: r.stdout.split('\n')[1] ?? '',
+        gitVersion: r.stdout.trim(),
       });
     } catch (err) {
       if (err instanceof RemoteExecError) {
@@ -140,4 +142,118 @@ export function hostsRoutes(pool: ExecutorPool) {
   });
 
   return r;
+}
+
+function hostNeedsCredential(host: HostConfig): boolean {
+  return host.kind === 'ssh' && (host.auth === 'password' || host.hasPassphrase);
+}
+
+async function parseCreateHost(
+  body: CreateHostInput,
+): Promise<
+  | { ok: true; host: HostConfig; password?: string }
+  | { ok: false; error: string }
+> {
+  if (!body?.alias) return { ok: false, error: 'alias is required' };
+  if (body.kind === 'local') {
+    return { ok: true, host: { alias: body.alias, kind: 'local' } };
+  }
+  if (body.kind !== 'ssh' || !body.hostname || !body.user) {
+    return { ok: false, error: 'alias, hostname and user are required' };
+  }
+  if (body.auth === 'password') {
+    return {
+      ok: true,
+      host: {
+        alias: body.alias,
+        kind: 'ssh',
+        auth: 'password',
+        hostname: body.hostname,
+        user: body.user,
+        port: body.port ?? 22,
+      },
+      password: body.password,
+    };
+  }
+  if (!body.keyPath) {
+    return { ok: false, error: 'keyPath is required for key auth' };
+  }
+  const encrypted = await detectEncrypted(body.keyPath);
+  return {
+    ok: true,
+    host: {
+      alias: body.alias,
+      kind: 'ssh',
+      auth: 'key',
+      hostname: body.hostname,
+      user: body.user,
+      port: body.port ?? 22,
+      keyPath: body.keyPath,
+      hasPassphrase: encrypted,
+    },
+  };
+}
+
+async function parseUpdateHost(
+  existing: HostConfig,
+  body: Partial<CreateHostInput> & { password?: string },
+): Promise<
+  | { ok: true; host: HostConfig; password?: string }
+  | { ok: false; error: string }
+> {
+  const kind = body.kind ?? existing.kind;
+  const sshBody = body as Partial<Extract<CreateHostInput, { kind: 'ssh' }>> & {
+    password?: string;
+  };
+  if (kind === 'local') {
+    return { ok: true, host: { alias: existing.alias, kind: 'local' } };
+  }
+
+  const sshExisting = existing.kind === 'ssh' ? existing : null;
+  const auth = sshBody.auth ?? sshExisting?.auth ?? 'key';
+  const hostname = sshBody.hostname ?? sshExisting?.hostname;
+  const user = sshBody.user ?? sshExisting?.user;
+  const port = sshBody.port ?? sshExisting?.port ?? 22;
+  const keyPathInput = 'keyPath' in sshBody ? sshBody.keyPath : undefined;
+  if (!hostname || !user) {
+    return { ok: false, error: 'hostname and user are required for SSH hosts' };
+  }
+
+  if (auth === 'password') {
+    return {
+      ok: true,
+      host: {
+        alias: existing.alias,
+        kind: 'ssh',
+        auth: 'password',
+        hostname,
+        user,
+        port,
+      },
+      password: sshBody.password,
+    };
+  }
+
+  const keyPath = keyPathInput ?? (sshExisting?.auth === 'key' ? sshExisting.keyPath : undefined);
+  if (!keyPath) return { ok: false, error: 'keyPath is required for key auth' };
+  const hasPassphrase =
+    keyPathInput && (!sshExisting || sshExisting.auth !== 'key' || sshExisting.keyPath !== keyPathInput)
+      ? await detectEncrypted(keyPathInput)
+      : sshExisting?.auth === 'key'
+        ? sshExisting.hasPassphrase
+        : await detectEncrypted(keyPath);
+
+  return {
+    ok: true,
+    host: {
+      alias: existing.alias,
+      kind: 'ssh',
+      auth: 'key',
+      hostname,
+      user,
+      port,
+      keyPath,
+      hasPassphrase,
+    } satisfies SshHostConfig,
+  };
 }

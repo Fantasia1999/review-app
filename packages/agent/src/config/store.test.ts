@@ -29,7 +29,7 @@ describe('config store', () => {
   it('creates a default config when file is missing', async () => {
     const store = await freshStore();
     const cfg = await store.loadConfig();
-    expect(cfg.version).toBe(1);
+    expect(cfg.version).toBe(2);
     expect(cfg.hosts).toEqual([]);
     expect(cfg.ui.annotationLayout).toBe('inline');
   });
@@ -39,6 +39,8 @@ describe('config store', () => {
     await store.updateConfig((c) => {
       c.hosts.push({
         alias: 'a',
+        kind: 'ssh',
+        auth: 'key',
         hostname: 'h',
         user: 'u',
         port: 22,
@@ -58,6 +60,8 @@ describe('config store', () => {
       await new Promise((r) => setTimeout(r, 5));
       c.hosts.push({
         alias: 'async',
+        kind: 'ssh',
+        auth: 'key',
         hostname: 'h',
         user: 'u',
         port: 22,
@@ -79,6 +83,8 @@ describe('config store', () => {
         store.updateConfig((c) => {
           c.hosts.push({
             alias: `h${i}`,
+            kind: 'ssh',
+            auth: 'key',
             hostname: 'x',
             user: 'u',
             port: 22,
@@ -96,25 +102,48 @@ describe('config store', () => {
 });
 
 describe('migrate', () => {
-  it('upgrades a missing version to v1 with defaults', async () => {
+  it('upgrades a missing version to v2 with defaults', async () => {
     const store = await freshStore();
     const out = store.migrate({ hosts: [] } as any);
-    expect(out.version).toBe(1);
+    expect(out.version).toBe(2);
     expect(out.ui).toBeDefined();
     expect(out.recentRepos).toEqual({});
   });
 
-  it('passes through v1 unchanged', async () => {
+  it('migrates v1 SSH key hosts to v2', async () => {
     const store = await freshStore();
     const cfg = {
       version: 1 as const,
-      hosts: [],
+      hosts: [{ alias: 'pre', hostname: 'h', user: 'u', port: 22, keyPath: '/k', hasPassphrase: false }],
       recentRepos: {},
       readMarks: [],
       ui: { theme: 'dark' as const, annotationLayout: 'sidebar' as const, fileTreeMode: 'tree' as const },
     };
     const out = store.migrate(cfg);
-    expect(out).toBe(cfg);
+    expect(out.version).toBe(2);
+    expect(out.hosts[0]).toEqual({
+      alias: 'pre',
+      kind: 'ssh',
+      auth: 'key',
+      hostname: 'h',
+      user: 'u',
+      port: 22,
+      keyPath: '/k',
+      hasPassphrase: false,
+    });
+  });
+
+  it('passes through v2 unchanged', async () => {
+    const store = await freshStore();
+    const cfg = {
+      version: 2 as const,
+      hosts: [{ alias: 'local', kind: 'local' as const }],
+      recentRepos: {},
+      readMarks: [],
+      ui: { theme: 'dark' as const, annotationLayout: 'sidebar' as const, fileTreeMode: 'tree' as const },
+    };
+    const out = store.migrate(cfg);
+    expect(out).toEqual(cfg);
   });
 
   it('reads pre-existing config file', async () => {
@@ -131,5 +160,6 @@ describe('migrate', () => {
     const store = await freshStore();
     const cfg = await store.loadConfig();
     expect(cfg.hosts[0].alias).toBe('pre');
+    expect(cfg.hosts[0]).toMatchObject({ kind: 'ssh', auth: 'key' });
   });
 });

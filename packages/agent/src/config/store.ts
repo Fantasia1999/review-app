@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import {
   DEFAULT_CONFIG,
   type AppConfig,
+  type HostConfig,
 } from '@review-app/shared';
 
 function configDir(): string {
@@ -106,13 +107,95 @@ async function persist(c: AppConfig): Promise<void> {
   }
 }
 
+type LegacyV1HostConfig = {
+  alias: string;
+  hostname: string;
+  user: string;
+  port: number;
+  keyPath: string;
+  hasPassphrase: boolean;
+};
+
+type RawConfig = Omit<Partial<AppConfig>, 'version' | 'hosts'> & {
+  version?: number;
+  hosts?: Array<HostConfig | LegacyV1HostConfig>;
+};
+
+function migrateHost(host: HostConfig | LegacyV1HostConfig): HostConfig {
+  if ('kind' in host) {
+    if (host.kind === 'local') {
+      return { alias: host.alias, kind: 'local' };
+    }
+    if (host.auth === 'password') {
+      return {
+        alias: host.alias,
+        kind: 'ssh',
+        auth: 'password',
+        hostname: host.hostname,
+        user: host.user,
+        port: host.port ?? 22,
+      };
+    }
+    return {
+      alias: host.alias,
+      kind: 'ssh',
+      auth: 'key',
+      hostname: host.hostname,
+      user: host.user,
+      port: host.port ?? 22,
+      keyPath: host.keyPath,
+      hasPassphrase: host.hasPassphrase ?? false,
+    };
+  }
+  return {
+    alias: host.alias,
+    kind: 'ssh',
+    auth: 'key',
+    hostname: host.hostname,
+    user: host.user,
+    port: host.port ?? 22,
+    keyPath: host.keyPath,
+    hasPassphrase: host.hasPassphrase ?? false,
+  };
+}
+
 /** Apply migrations from older config versions. Exported for tests. */
-export function migrate(raw: AppConfig & { version?: number }): AppConfig {
+export function migrate(raw: RawConfig): AppConfig {
   const v = raw.version ?? 0;
-  // v1 is current. Add cases here as schema evolves.
-  if (v === 1) return raw;
+  if (v > 2) return raw as AppConfig;
+
+  if (v === 2) {
+    return {
+      ...DEFAULT_CONFIG,
+      ...raw,
+      version: 2,
+      hosts: (raw.hosts ?? []).map(migrateHost),
+      recentRepos: raw.recentRepos ?? {},
+      readMarks: raw.readMarks ?? [],
+      ui: { ...DEFAULT_CONFIG.ui, ...(raw.ui ?? {}) },
+    };
+  }
+
+  if (v === 1) {
+    return {
+      ...DEFAULT_CONFIG,
+      ...raw,
+      version: 2,
+      hosts: (raw.hosts ?? []).map(migrateHost),
+      recentRepos: raw.recentRepos ?? {},
+      readMarks: raw.readMarks ?? [],
+      ui: { ...DEFAULT_CONFIG.ui, ...(raw.ui ?? {}) },
+    };
+  }
   // Unknown future version - just trust it (forward compat)
-  if (v > 1) return raw;
   // Pre-v1: shouldn't happen unless someone manually edited the file
-  return { ...DEFAULT_CONFIG, ...raw, version: 1 };
+  return {
+    ...DEFAULT_CONFIG,
+    ...raw,
+    version: 2,
+    hosts: (raw.hosts ?? []).map(migrateHost),
+    recentRepos: raw.recentRepos ?? {},
+    readMarks: raw.readMarks ?? [],
+    ui: { ...DEFAULT_CONFIG.ui, ...(raw.ui ?? {}) },
+  };
 }

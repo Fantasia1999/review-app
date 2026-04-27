@@ -1,27 +1,61 @@
 import { useState } from 'react';
+import type { CreateHostInput } from '@shared/types';
 import { useAddHost, useLocalKeys } from '../api/hooks';
 
 export function AddHostModal({ onClose }: { onClose: () => void }) {
   const [alias, setAlias] = useState('');
+  const [kind, setKind] = useState<'ssh' | 'local'>('ssh');
+  const [auth, setAuth] = useState<'key' | 'password'>('key');
   const [hostname, setHostname] = useState('');
   const [user, setUser] = useState('');
   const [port, setPort] = useState(22);
   const [keyPath, setKeyPath] = useState('');
+  const [password, setPassword] = useState('');
   const [customKey, setCustomKey] = useState(false);
   const keys = useLocalKeys();
   const addHost = useAddHost();
   const [err, setErr] = useState<string | null>(null);
 
+  const isLocal = kind === 'local';
+  const isPassword = kind === 'ssh' && auth === 'password';
+  const isKey = kind === 'ssh' && auth === 'key';
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
+    const payload: CreateHostInput = isLocal
+      ? { alias, kind: 'local' }
+      : isPassword
+        ? {
+            alias,
+            kind: 'ssh',
+            auth: 'password',
+            hostname,
+            user,
+            port,
+            password,
+          }
+        : {
+            alias,
+            kind: 'ssh',
+            auth: 'key',
+            hostname,
+            user,
+            port,
+            keyPath,
+          };
     try {
-      await addHost.mutateAsync({ alias, hostname, user, port, keyPath });
+      await addHost.mutateAsync(payload);
       onClose();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
   };
+
+  const canSave =
+    !!alias &&
+    (isLocal ||
+      (!!hostname && !!user && (isPassword ? !!password : !!keyPath)));
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -41,85 +75,138 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setAlias(e.target.value)}
               required
               autoFocus
-              placeholder="dev-box"
+              placeholder={isLocal ? 'local' : 'dev-box'}
             />
           </label>
+
           <label>
-            Hostname
-            <input
-              type="text"
-              value={hostname}
-              onChange={(e) => setHostname(e.target.value)}
-              required
-              placeholder="dev.example.com"
-            />
+            Connection type
+            <select
+              value={kind}
+              onChange={(e) => setKind(e.target.value as 'ssh' | 'local')}
+            >
+              <option value="ssh">SSH host</option>
+              <option value="local">Local machine</option>
+            </select>
           </label>
-          <div className="row">
-            <label className="grow">
-              User
-              <input
-                type="text"
-                value={user}
-                onChange={(e) => setUser(e.target.value)}
-                required
-                placeholder="me"
-              />
-            </label>
-            <label>
-              Port
-              <input
-                type="number"
-                value={port}
-                onChange={(e) => setPort(parseInt(e.target.value, 10) || 22)}
-                min={1}
-                max={65535}
-              />
-            </label>
-          </div>
-          <fieldset className="key-picker">
-            <legend>Private key</legend>
-            {!customKey && keys.data && (
-              <ul className="key-list">
-                {keys.data.keys.length === 0 && (
-                  <li className="hint">No keys found in ~/.ssh/</li>
-                )}
-                {keys.data.keys.map((k) => (
-                  <li key={k.path}>
-                    <label>
-                      <input
-                        type="radio"
-                        name="key"
-                        checked={keyPath === k.path}
-                        onChange={() => setKeyPath(k.path)}
-                      />
-                      <span>{k.filename}</span>
-                      {k.encrypted && <span className="badge">encrypted</span>}
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <label className="custom-key-toggle">
-              <input
-                type="checkbox"
-                checked={customKey}
-                onChange={(e) => {
-                  setCustomKey(e.target.checked);
-                  if (!e.target.checked) setKeyPath('');
-                }}
-              />
-              Specify custom path
-            </label>
-            {customKey && (
-              <input
-                type="text"
-                value={keyPath}
-                onChange={(e) => setKeyPath(e.target.value)}
-                placeholder="/absolute/path/to/private_key"
-                required
-              />
-            )}
-          </fieldset>
+
+          {!isLocal && (
+            <>
+              <label>
+                Hostname
+                <input
+                  type="text"
+                  value={hostname}
+                  onChange={(e) => setHostname(e.target.value)}
+                  required
+                  placeholder="dev.example.com"
+                />
+              </label>
+              <div className="row">
+                <label className="grow">
+                  User
+                  <input
+                    type="text"
+                    value={user}
+                    onChange={(e) => setUser(e.target.value)}
+                    required
+                    placeholder="me"
+                  />
+                </label>
+                <label>
+                  Port
+                  <input
+                    type="number"
+                    value={port}
+                    onChange={(e) => setPort(parseInt(e.target.value, 10) || 22)}
+                    min={1}
+                    max={65535}
+                  />
+                </label>
+              </div>
+
+              <label>
+                Authentication
+                <select
+                  value={auth}
+                  onChange={(e) => setAuth(e.target.value as 'key' | 'password')}
+                >
+                  <option value="key">Private key</option>
+                  <option value="password">Password</option>
+                </select>
+              </label>
+
+              {isKey && (
+                <fieldset className="key-picker">
+                  <legend>Private key</legend>
+                  {!customKey && keys.data && (
+                    <ul className="key-list">
+                      {keys.data.keys.length === 0 && (
+                        <li className="hint">No keys found in ~/.ssh/</li>
+                      )}
+                      {keys.data.keys.map((k) => (
+                        <li key={k.path}>
+                          <label>
+                            <input
+                              type="radio"
+                              name="key"
+                              checked={keyPath === k.path}
+                              onChange={() => setKeyPath(k.path)}
+                            />
+                            <span>{k.filename}</span>
+                            {k.encrypted && <span className="badge">encrypted</span>}
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <label className="custom-key-toggle">
+                    <input
+                      type="checkbox"
+                      checked={customKey}
+                      onChange={(e) => {
+                        setCustomKey(e.target.checked);
+                        if (!e.target.checked) setKeyPath('');
+                      }}
+                    />
+                    Specify custom path
+                  </label>
+                  {customKey && (
+                    <input
+                      type="text"
+                      value={keyPath}
+                      onChange={(e) => setKeyPath(e.target.value)}
+                      placeholder="C:\\absolute\\path\\to\\private_key"
+                      required
+                    />
+                  )}
+                </fieldset>
+              )}
+
+              {isPassword && (
+                <label>
+                  Password
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="SSH account password"
+                    required
+                  />
+                  <div className="hint small">
+                    Held in memory for this session only. Never written to disk.
+                  </div>
+                </label>
+              )}
+            </>
+          )}
+
+          {isLocal && (
+            <div className="hint">
+              Opens git repositories from this machine&apos;s local disk.
+            </div>
+          )}
+
           {err && <div className="error-box">{err}</div>}
           <div className="modal-actions">
             <button type="button" onClick={onClose}>
@@ -128,7 +215,7 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
             <button
               type="submit"
               className="btn-primary"
-              disabled={!alias || !hostname || !user || !keyPath || addHost.isPending}
+              disabled={!canSave || addHost.isPending}
             >
               {addHost.isPending ? 'Saving…' : 'Save'}
             </button>

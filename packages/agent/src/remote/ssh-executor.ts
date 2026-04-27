@@ -4,14 +4,14 @@
  * One ssh2 Client per host, kept alive while in use. Channels (exec calls)
  * are multiplexed over the single TCP connection by ssh2.
  *
- * Auth: only direct private key auth is supported. If the key is encrypted,
- * a passphrase must be passed in. We do not consult ssh-agent or system
- * keychain - that's intentional, see DESIGN.md.
+ * Auth: direct private key or password auth. Key passphrases and SSH
+ * passwords are supplied by the local agent and held in memory only.
+ * We do not consult ssh-agent or system keychain - that's intentional.
  */
 
 import { Client } from 'ssh2';
 import { readFile } from 'node:fs/promises';
-import type { HostConfig } from '@review-app/shared';
+import type { SshHostConfig } from '@review-app/shared';
 import {
   RemoteExecutor,
   ExecResult,
@@ -29,8 +29,8 @@ export class SSHExecutor implements RemoteExecutor {
   private connected = false;
 
   constructor(
-    private readonly host: HostConfig,
-    private readonly passphrase: string | undefined,
+    private readonly host: SshHostConfig,
+    private readonly secret: string | undefined,
   ) {}
 
   isReady(): boolean {
@@ -42,14 +42,21 @@ export class SSHExecutor implements RemoteExecutor {
     if (this.connectPromise) return this.connectPromise;
 
     this.connectPromise = (async () => {
-      const privateKey = await readFile(this.host.keyPath);
+      const privateKey =
+        this.host.auth === 'key'
+          ? await readFile(this.host.keyPath)
+          : undefined;
 
-      // Pre-check: if the key is known-encrypted and we have no passphrase,
-      // short-circuit before ssh2.connect throws synchronously on some keys.
-      if (this.host.hasPassphrase && !this.passphrase) {
+      if (this.host.auth === 'key' && this.host.hasPassphrase && !this.secret) {
         throw new RemoteExecError({
           kind: 'ssh_passphrase_required',
           message: 'Private key requires a passphrase',
+        });
+      }
+      if (this.host.auth === 'password' && !this.secret) {
+        throw new RemoteExecError({
+          kind: 'ssh_password_required',
+          message: 'SSH password required',
         });
       }
 
@@ -60,7 +67,25 @@ export class SSHExecutor implements RemoteExecutor {
           // Map ssh2 errors to our typed RemoteError so UI can render properly
           const msg = err.message || String(err);
           if (/encrypted/i.test(msg) || err.level === 'client-authentication') {
-            if (this.host.hasPassphrase && !this.passphrase) {
+            if (this.host.auth === 'password') {
+              if (!this.secret) {
+                reject(
+                  new RemoteExecError({
+                    kind: 'ssh_password_required',
+                    message: 'SSH password required',
+                  }),
+                );
+                return;
+              }
+              reject(
+                new RemoteExecError({
+                  kind: 'ssh_password_wrong',
+                  message: 'Wrong SSH password',
+                }),
+              );
+              return;
+            }
+            if (this.host.hasPassphrase && !this.secret) {
               reject(
                 new RemoteExecError({
                   kind: 'ssh_passphrase_required',
@@ -116,7 +141,8 @@ export class SSHExecutor implements RemoteExecutor {
             port: this.host.port,
             username: this.host.user,
             privateKey,
-            passphrase: this.passphrase,
+            password: this.host.auth === 'password' ? this.secret : undefined,
+            passphrase: this.host.auth === 'key' ? this.secret : undefined,
             keepaliveInterval: 30_000,
             readyTimeout: 15_000,
           });

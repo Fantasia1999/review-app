@@ -4,20 +4,72 @@
  */
 
 // ============================================================
-// Host config (SSH connection)
+// Host config (local or SSH connection)
 // ============================================================
 
-export interface HostConfig {
+export interface BaseHostConfig {
   /** UI display name + lookup key */
   alias: string;
+  kind: 'local' | 'ssh';
+}
+
+export interface LocalHostConfig extends BaseHostConfig {
+  kind: 'local';
+}
+
+export interface SshHostConfigBase extends BaseHostConfig {
+  kind: 'ssh';
   hostname: string;
   user: string;
   port: number;
+  auth: 'key' | 'password';
+}
+
+export interface SshKeyHostConfig extends SshHostConfigBase {
+  auth: 'key';
   /** Absolute path to private key file on local disk */
   keyPath: string;
   /** True if private key is encrypted (detected on save) */
   hasPassphrase: boolean;
 }
+
+export interface SshPasswordHostConfig extends SshHostConfigBase {
+  auth: 'password';
+}
+
+export type SshHostConfig = SshKeyHostConfig | SshPasswordHostConfig;
+export type HostConfig = LocalHostConfig | SshHostConfig;
+
+export interface CreateLocalHostInput {
+  alias: string;
+  kind: 'local';
+}
+
+export interface CreateSshKeyHostInput {
+  alias: string;
+  kind: 'ssh';
+  hostname: string;
+  user: string;
+  port?: number;
+  auth: 'key';
+  keyPath: string;
+}
+
+export interface CreateSshPasswordHostInput {
+  alias: string;
+  kind: 'ssh';
+  hostname: string;
+  user: string;
+  port?: number;
+  auth: 'password';
+  /** Memory-only; never persisted to config. */
+  password?: string;
+}
+
+export type CreateHostInput =
+  | CreateLocalHostInput
+  | CreateSshKeyHostInput
+  | CreateSshPasswordHostInput;
 
 export interface HostStatus {
   alias: string;
@@ -125,6 +177,8 @@ export interface RemoteError {
   kind:
     | 'ssh_connect_failed'
     | 'ssh_auth_failed'
+    | 'ssh_password_required'
+    | 'ssh_password_wrong'
     | 'ssh_passphrase_required'
     | 'ssh_passphrase_wrong'
     | 'cmd_failed'
@@ -155,7 +209,7 @@ export interface ReadMark {
 // ============================================================
 
 export interface AppConfig {
-  version: 1;
+  version: 2;
   hosts: HostConfig[];
   recentRepos: Record<string, RepoEntry[]>; // hostAlias -> recent repos
   readMarks: ReadMark[];
@@ -167,7 +221,7 @@ export interface AppConfig {
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
-  version: 1,
+  version: 2,
   hosts: [],
   recentRepos: {},
   readMarks: [],

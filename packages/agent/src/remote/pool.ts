@@ -2,13 +2,14 @@
  * Connection pool: one RemoteExecutor per host alias, lazily created,
  * reaped after IDLE_TIMEOUT_MS of inactivity.
  *
- * The pool also holds passphrases in memory (per host) for the lifetime
- * of the agent process. Passphrases are never written to disk.
+ * The pool also holds SSH secrets in memory (passwords or key passphrases)
+ * for the lifetime of the agent process. Secrets are never written to disk.
  */
 
-import type { HostConfig } from '@review-app/shared';
+import type { HostConfig, SshHostConfig } from '@review-app/shared';
 import type { RemoteExecutor } from './executor';
 import { SSHExecutor } from './ssh-executor';
+import { LocalExecutor } from './local-executor';
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 min
 
@@ -20,15 +21,23 @@ interface PoolEntry {
 
 export class ExecutorPool {
   private entries = new Map<string, PoolEntry>();
-  private passphrases = new Map<string, string>(); // hostAlias -> passphrase
+  private secrets = new Map<string, string>(); // hostAlias -> password or passphrase
 
   /** Store a passphrase in memory for this host. Persists for the agent's lifetime. */
   setPassphrase(alias: string, passphrase: string): void {
-    this.passphrases.set(alias, passphrase);
+    this.secrets.set(alias, passphrase);
+  }
+
+  setPassword(alias: string, password: string): void {
+    this.secrets.set(alias, password);
   }
 
   hasPassphrase(alias: string): boolean {
-    return this.passphrases.has(alias);
+    return this.secrets.has(alias);
+  }
+
+  hasCredential(alias: string): boolean {
+    return this.secrets.has(alias);
   }
 
   /**
@@ -43,8 +52,11 @@ export class ExecutorPool {
       return this.wrapForReaping(host.alias, existing.executor);
     }
 
-    const passphrase = this.passphrases.get(host.alias);
-    const executor = new SSHExecutor(host, passphrase);
+    const secret = this.secrets.get(host.alias);
+    const executor =
+      host.kind === 'local'
+        ? new LocalExecutor()
+        : new SSHExecutor(host as SshHostConfig, secret);
     const entry: PoolEntry = {
       executor,
       lastUsed: Date.now(),
@@ -116,6 +128,10 @@ export class ExecutorPool {
 
   /** Forget passphrase for a host (e.g. when user edits the host's key path). */
   clearPassphrase(alias: string): void {
-    this.passphrases.delete(alias);
+    this.secrets.delete(alias);
+  }
+
+  clearCredential(alias: string): void {
+    this.secrets.delete(alias);
   }
 }

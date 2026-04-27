@@ -16,9 +16,10 @@ constraints.
 ### 1.1 What this is
 
 A **lightweight browser-based code review tool** for self-review of
-uncommitted changes on a remote development host, accessed over SSH. The
-user opens a local CLI binary, a browser tab opens, they pick a host and
-a repo path, and they see the equivalent of `git diff HEAD` rendered in a
+uncommitted changes in either a local working tree or a remote development
+host accessed over SSH. The user opens a local CLI binary, a browser tab
+opens, they pick a host and a repo path, and they see the equivalent of
+`git diff HEAD` rendered in a
 clean diff UI with the ability to leave **markdown annotations** on any
 5-line code window.
 
@@ -64,9 +65,10 @@ work** in a browser before committing. Annotations exist primarily to
 │   React + @pierre/diffs  │◄───────►│   Bun + Hono             │◄────────►│  Remote     │
 │   localhost:7676         │         │   ssh2 + bun:sqlite      │          │  (just git) │
 └──────────────────────────┘         └──────────────────────────┘          └─────────────┘
-                                              │
-                                              ▼
-                                     ~/.review-app/
+                                               │
+                                               ├── local git execution
+                                               ▼
+                                      ~/.review-app/
                                        ├─ config.json   (hosts, recents, read-marks, prefs)
                                        └─ db.sqlite     (annotations)
 ```
@@ -76,7 +78,7 @@ work** in a browser before committing. Annotations exist primarily to
 A single Bun process (`./review-app`) hosts:
 
 1. The Hono HTTP server on `127.0.0.1:7676` (auto-incremented if busy, max 5 tries)
-2. The SSH connection pool (`ExecutorPool`)
+2. The executor pool (`ExecutorPool`) for SSH or local execution
 3. The SQLite database (`bun:sqlite`)
 4. Static asset serving (the bundled React app)
 
@@ -117,8 +119,12 @@ interface RemoteExecutor {
 }
 ```
 
-The current implementation is `SSHExecutor`, which uses `ssh2` to maintain
-one TCP connection per host with multiplexed channels for each `exec()`.
+The current implementations are:
+
+- `SSHExecutor`, which uses `ssh2` to maintain one TCP connection per SSH
+  host with multiplexed channels for each `exec()`
+- `LocalExecutor`, which runs the same git/content operations against the
+  local machine without going through a platform shell
 
 **Future**: a `DaemonExecutor` will satisfy the same interface but talk to
 a small process running on the remote (over a unix socket forwarded
@@ -211,9 +217,12 @@ The user said "朴素做法就可以" — the simplest thing that works. So:
 - We do NOT support ProxyJump, Pageant, 1Password agent, hardware tokens.
 - We DO scan `~/.ssh/` for files matching `id_(rsa|ed25519|ecdsa|dsa)`
   and offer them in the "add host" UI.
+- We DO support direct SSH password auth as an additional simple path.
 - We DO support passphrase-protected keys: the user is prompted on
-  first connect, the passphrase is held in `ExecutorPool.passphrases`
-  in memory, and **never written to disk**. It dies with the agent process.
+  first connect, and we hold the key passphrase in memory only.
+- We DO hold SSH passwords in memory only when password auth is used.
+- Passwords and passphrases are **never written to disk**. They die with
+  the agent process.
 
 If a future contributor wants to add ssh-agent support, do it as an
 *additional* auth path, not a replacement. Don't break the simple flow.
@@ -585,8 +594,9 @@ in `shared/types.ts`.
 | PUT    | `/api/hosts/:alias`                     | Update a host                      |
 | DELETE | `/api/hosts/:alias`                     | Remove a host                      |
 | GET    | `/api/hosts/keys`                       | Scan ~/.ssh/ for keys              |
-| POST   | `/api/hosts/:alias/passphrase`          | Submit passphrase for host         |
-| POST   | `/api/hosts/:alias/test`                | Echo test + git --version          |
+| POST   | `/api/hosts/:alias/passphrase`          | Submit key passphrase for host     |
+| POST   | `/api/hosts/:alias/password`            | Submit SSH password for host       |
+| POST   | `/api/hosts/:alias/test`                | git --version connectivity test    |
 | GET    | `/api/repos/:alias/recent`              | Recent repos for host              |
 | POST   | `/api/repos/:alias/validate`            | Check path is a git work tree      |
 | POST   | `/api/repos/:alias/touch`               | Bump repo to top of recents        |

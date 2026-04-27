@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSubmitPassphrase } from '../api/hooks';
+import { useSubmitPassphrase, useSubmitPassword } from '../api/hooks';
 import type { HostConfig } from '@shared/types';
 
 export function PassphraseModal({
@@ -11,15 +11,23 @@ export function PassphraseModal({
   onClose: () => void;
   onSubmitted: () => void;
 }) {
-  const [passphrase, setPassphrase] = useState('');
-  const submit = useSubmitPassphrase();
+  const [secret, setSecret] = useState('');
+  const submitPassphrase = useSubmitPassphrase();
+  const submitPassword = useSubmitPassword();
   const [err, setErr] = useState<string | null>(null);
+  const isPassword = host.kind === 'ssh' && host.auth === 'password';
+  const submit = isPassword ? submitPassword : submitPassphrase;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
     try {
-      await submit.mutateAsync({ alias: host.alias, passphrase });
+      if (host.kind !== 'ssh') return;
+      if (host.auth === 'password') {
+        await submitPassword.mutateAsync({ alias: host.alias, password: secret });
+      } else {
+        await submitPassphrase.mutateAsync({ alias: host.alias, passphrase: secret });
+      }
       onSubmitted();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -30,22 +38,32 @@ export function PassphraseModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <header className="modal-header">
-          <h2>Unlock private key</h2>
+          <h2>{isPassword ? 'Enter SSH password' : 'Unlock private key'}</h2>
           <button className="btn-close" onClick={onClose}>×</button>
         </header>
         <form onSubmit={onSubmit}>
           <p>
-            The key for <strong>{host.alias}</strong> is encrypted.
+            {isPassword ? (
+              <>
+                Enter the SSH password for <strong>{host.alias}</strong>.
+              </>
+            ) : (
+              <>
+                The key for <strong>{host.alias}</strong> is encrypted.
+              </>
+            )}
           </p>
-          <p className="hint">
-            <code>{host.keyPath}</code>
-          </p>
+          {host.kind === 'ssh' && host.auth === 'key' && (
+            <p className="hint">
+              <code>{host.keyPath}</code>
+            </p>
+          )}
           <label>
-            Passphrase
+            {isPassword ? 'Password' : 'Passphrase'}
             <input
               type="password"
-              value={passphrase}
-              onChange={(e) => setPassphrase(e.target.value)}
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
               autoFocus
               required
             />
@@ -59,9 +77,15 @@ export function PassphraseModal({
             <button
               type="submit"
               className="btn-primary"
-              disabled={!passphrase || submit.isPending}
+              disabled={!secret || submit.isPending}
             >
-              {submit.isPending ? 'Unlocking…' : 'Unlock'}
+              {submit.isPending
+                ? isPassword
+                  ? 'Saving…'
+                  : 'Unlocking…'
+                : isPassword
+                  ? 'Save password'
+                  : 'Unlock'}
             </button>
           </div>
         </form>

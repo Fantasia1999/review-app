@@ -1,12 +1,11 @@
 /**
  * Hosts page - landing page.
  *
- * Lists configured SSH hosts. Each card shows alias / user@host:port and
- * has actions to enter the host (-> repo picker), test connection, and
- * delete. An "Add host" button opens a modal.
+ * Lists configured hosts. Each card shows either local-machine or SSH
+ * connection details and has actions to enter, test, and delete.
  *
- * If the host's key needs a passphrase and it's not yet loaded for this
- * agent session, clicking "open" prompts for the passphrase first.
+ * If the host needs an in-memory credential (password or key passphrase)
+ * and it's not yet loaded for this agent session, clicking "open" prompts.
  */
 
 import { useState } from 'react';
@@ -25,10 +24,12 @@ export function HostsPage() {
   if (isLoading) return <div className="page loading">Loading...</div>;
 
   const hosts = data?.hosts ?? [];
-  const passphraseLoaded = new Set(data?.passphraseLoaded ?? []);
+  const credentialLoaded = new Set(
+    data?.credentialLoaded ?? data?.passphraseLoaded ?? [],
+  );
 
   const open = (host: HostConfig) => {
-    if (host.hasPassphrase && !passphraseLoaded.has(host.alias)) {
+    if (needsCredential(host) && !credentialLoaded.has(host.alias)) {
       setPassphraseFor(host);
       return;
     }
@@ -84,6 +85,10 @@ export function HostsPage() {
   );
 }
 
+function needsCredential(host: HostConfig): boolean {
+  return host.kind === 'ssh' && (host.auth === 'password' || host.hasPassphrase);
+}
+
 function HostCard({
   host,
   onOpen,
@@ -99,11 +104,20 @@ function HostCard({
       <div className="host-card-main" onClick={onOpen}>
         <div className="host-alias">{host.alias}</div>
         <div className="host-conn">
-          {host.user}@{host.hostname}:{host.port}
+          {host.kind === 'local'
+            ? 'Local machine'
+            : `${host.user}@${host.hostname}:${host.port}`}
         </div>
-        <div className="host-key">
-          {host.keyPath} {host.hasPassphrase && <span className="badge">encrypted</span>}
-        </div>
+        {host.kind === 'ssh' && host.auth === 'key' && (
+          <div className="host-key">
+            {host.keyPath} {host.hasPassphrase && <span className="badge">encrypted</span>}
+          </div>
+        )}
+        {host.kind === 'ssh' && host.auth === 'password' && (
+          <div className="host-key">
+            Password auth <span className="badge">memory-only</span>
+          </div>
+        )}
       </div>
       <div className="host-card-actions">
         <button
