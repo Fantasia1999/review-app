@@ -1,0 +1,225 @@
+/**
+ * Review page - the heart of the app.
+ *
+ * Layout: left sidebar with file tree, main area with the selected file's
+ * diff plus annotations. Top bar has refresh, layout toggle, copy-all.
+ *
+ * Refresh strategy: manual button + automatic on window focus (TanStack Query
+ * default). No polling.
+ *
+ * Keyboard:
+ *   r     - refresh
+ *   j/k   - next/prev file
+ *   c     - create annotation on currently selected lines (handled in DiffView)
+ */
+
+import { useEffect, useMemo } from 'react';
+import {
+  useChanges,
+  useAnnotations,
+  useReadMarks,
+  useMarkRead,
+  usePrefs,
+  useUpdatePrefs,
+} from '../api/hooks';
+import { navigate } from '../routes';
+import { FileTree } from '../components/FileTree';
+import { DiffView } from '../components/DiffView';
+import { AnnotationSidebar } from '../components/AnnotationSidebar';
+import { CopyAllButton } from '../components/CopyAllButton';
+import type { FileChange } from '@shared/types';
+
+export function ReviewPage({
+  hostAlias,
+  repoPath,
+  filePath,
+}: {
+  hostAlias: string;
+  repoPath: string;
+  filePath?: string;
+}) {
+  const changes = useChanges(hostAlias, repoPath);
+  const annotations = useAnnotations(hostAlias, repoPath);
+  const readMarks = useReadMarks(hostAlias, repoPath);
+  const prefs = usePrefs();
+  const updatePrefs = useUpdatePrefs();
+  const markRead = useMarkRead();
+
+  const layout = prefs.data?.prefs.annotationLayout ?? 'inline';
+
+  // Default-select first file if none specified
+  const selectedFile = useMemo<FileChange | undefined>(() => {
+    if (!changes.data) return undefined;
+    if (filePath) {
+      return changes.data.files.find((f) => f.path === filePath);
+    }
+    return changes.data.files[0];
+  }, [changes.data, filePath]);
+
+  // Sync URL when first file auto-selected
+  useEffect(() => {
+    if (changes.data && !filePath && changes.data.files[0]) {
+      navigate({
+        view: 'review',
+        hostAlias,
+        repoPath,
+        filePath: changes.data.files[0].path,
+      });
+    }
+  }, [changes.data, filePath, hostAlias, repoPath]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Ignore when typing in inputs
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
+
+      if (e.key === 'r') {
+        changes.refetch();
+      } else if (e.key === 'j' || e.key === 'k') {
+        if (!changes.data || !selectedFile) return;
+        const idx = changes.data.files.findIndex((f) => f.path === selectedFile.path);
+        const next = e.key === 'j' ? idx + 1 : idx - 1;
+        const target = changes.data.files[next];
+        if (target) {
+          navigate({ view: 'review', hostAlias, repoPath, filePath: target.path });
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [changes, selectedFile, hostAlias, repoPath]);
+
+  if (changes.isLoading) {
+    return <div className="page loading">Loading changes…</div>;
+  }
+  if (changes.error) {
+    const err = changes.error as Error & { info?: { message: string; stderr?: string; kind: string } };
+    return (
+      <div className="page">
+        <header className="page-header">
+          <button className="btn-link" onClick={() => navigate({ view: 'repo-picker', hostAlias })}>
+            ← Back
+          </button>
+        </header>
+        <div className="error-box">
+          <strong>{err.info?.kind ?? 'error'}:</strong> {err.message}
+          {err.info?.stderr && <pre className="stderr">{err.info.stderr}</pre>}
+        </div>
+      </div>
+    );
+  }
+
+  if (!changes.data) return null;
+  const summary = changes.data;
+
+  return (
+    <div className="review-layout">
+      <aside className="review-sidebar">
+        <header className="review-sidebar-header">
+          <button
+            className="btn-link"
+            onClick={() => navigate({ view: 'repo-picker', hostAlias })}
+            title="Back to repo picker"
+          >
+            ←
+          </button>
+          <div className="repo-label" title={repoPath}>
+            <div className="repo-host">{hostAlias}</div>
+            <div className="repo-path">{repoPath}</div>
+          </div>
+        </header>
+        <div className="review-actions">
+          <button onClick={() => changes.refetch()} disabled={changes.isFetching}>
+            {changes.isFetching ? 'Refreshing…' : 'Refresh (r)'}
+          </button>
+        </div>
+        {summary.files.length === 0 ? (
+          <div className="empty-state-small">No changes in working tree</div>
+        ) : (
+          <FileTree
+            files={summary.files}
+            selected={selectedFile?.path}
+            readMarks={readMarks.data?.marks ?? []}
+            mode={prefs.data?.prefs.fileTreeMode ?? 'auto'}
+            annotationCounts={countAnnotationsByFile(annotations.data?.annotations ?? [])}
+            onSelect={(path) =>
+              navigate({ view: 'review', hostAlias, repoPath, filePath: path })
+            }
+          />
+        )}
+      </aside>
+
+      <main className="review-main">
+        <header className="review-main-header">
+          <div className="review-main-title">
+            {selectedFile ? selectedFile.path : 'Select a file'}
+          </div>
+          <div className="review-main-actions">
+            <button
+              onClick={() =>
+                updatePrefs.mutate({
+                  annotationLayout: layout === 'inline' ? 'sidebar' : 'inline',
+                })
+              }
+              title="Toggle annotation layout"
+            >
+              {layout === 'inline' ? '☰ Sidebar' : '⤺ Inline'}
+            </button>
+            <CopyAllButton
+              hostAlias={hostAlias}
+              repoPath={repoPath}
+              annotations={annotations.data?.annotations ?? []}
+            />
+          </div>
+        </header>
+
+        <div className="review-content">
+          {selectedFile ? (
+            <DiffView
+              hostAlias={hostAlias}
+              repoPath={repoPath}
+              file={selectedFile}
+              annotations={(annotations.data?.annotations ?? []).filter(
+                (a) => a.filePath === selectedFile.path,
+              )}
+              layout={layout}
+              onMarkRead={(contentHash) =>
+                markRead.mutate({
+                  hostAlias,
+                  repoPath,
+                  filePath: selectedFile.path,
+                  contentHash,
+                })
+              }
+            />
+          ) : (
+            <div className="empty-state">Select a file from the sidebar.</div>
+          )}
+        </div>
+
+        {layout === 'sidebar' && selectedFile && (
+          <AnnotationSidebar
+            hostAlias={hostAlias}
+            repoPath={repoPath}
+            filePath={selectedFile.path}
+            annotations={(annotations.data?.annotations ?? []).filter(
+              (a) => a.filePath === selectedFile.path,
+            )}
+          />
+        )}
+      </main>
+    </div>
+  );
+}
+
+function countAnnotationsByFile(
+  annotations: { filePath: string }[],
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const a of annotations) {
+    map.set(a.filePath, (map.get(a.filePath) ?? 0) + 1);
+  }
+  return map;
+}

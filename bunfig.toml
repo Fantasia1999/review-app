@@ -1,0 +1,7 @@
+[install]
+peer = true
+
+[install.scopes]
+
+[run]
+bun = true

@@ -1,0 +1,23 @@
+{
+  "name": "@review-app/agent",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --target=bun --outdir=dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@review-app/shared": "workspace:*",
+    "hono": "^4.6.0",
+    "ssh2": "^1.16.0",
+    "drizzle-orm": "^0.36.0",
+    "nanoid": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/ssh2": "^1.15.0",
+    "drizzle-kit": "^0.28.0"
+  }
+}

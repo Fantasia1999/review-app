@@ -1,0 +1,25 @@
+{
+  "name": "review-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "dev:agent": "bun run --filter agent dev",
+    "dev:client": "bun run --filter client dev",
+    "build": "bun run --filter client build && bun run --filter agent build",
+    "build:client": "bun run --filter client build",
+    "build:agent": "bun run --filter agent build",
+    "embed": "bun run scripts/embed-assets.ts",
+    "package:macos": "bun run build:client && bun run embed && bun build packages/agent/src/index.ts --compile --target=bun-darwin-arm64 --outfile=dist/review-app-macos",
+    "package:windows": "bun run build:client && bun run embed && bun build packages/agent/src/index.ts --compile --target=bun-windows-x64 --outfile=dist/review-app-windows.exe",
+    "typecheck": "bun run --filter '*' typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/bun": "latest"
+  }
+}
