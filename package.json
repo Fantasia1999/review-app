@@ -8,12 +8,13 @@
   ],
   "scripts": {
     "dev": "bun run --filter '*' dev",
-    "dev:agent": "bun run --filter agent dev",
-    "dev:client": "bun run --filter client dev",
+    "dev:agent": "bun run --filter @review-app/agent dev",
+    "dev:client": "bun run --filter @review-app/client dev",
     "build": "bun run --filter client build && bun run --filter agent build",
-    "build:client": "bun run --filter client build",
-    "build:agent": "bun run --filter agent build",
+    "build:client": "bun run --filter @review-app/client build",
+    "build:agent": "bun run --filter @review-app/agent build",
     "embed": "bun run scripts/embed-assets.ts",
+    "test": "bun run --filter '*' test",
     "package:macos": "bun run build:client && bun run embed && bun build packages/agent/src/index.ts --compile --target=bun-darwin-arm64 --outfile=dist/review-app-macos",
     "package:windows": "bun run build:client && bun run embed && bun build packages/agent/src/index.ts --compile --target=bun-windows-x64 --outfile=dist/review-app-windows.exe",
     "typecheck": "bun run --filter '*' typecheck"

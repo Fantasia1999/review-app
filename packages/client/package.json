@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "tsc -b --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
   },
   "dependencies": {
     "@review-app/shared": "workspace:*",

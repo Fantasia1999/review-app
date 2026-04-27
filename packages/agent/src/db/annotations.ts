@@ -14,15 +14,28 @@ import type {
   CreateAnnotationInput,
 } from '@review-app/shared';
 import { annotations } from './schema';
-import { DB_PATH } from '../config/store';
+import { getDbPath } from '../config/store';
 import { ensureConfigDir } from '../config/store';
 
 let db: BunSQLiteDatabase | null = null;
+let dbPath: string | null = null;
+let rawSqlite: Database | null = null;
+
+/** Test-only: close DB so the file can be cleaned up. */
+export function __closeDbForTests(): void {
+  if (rawSqlite) {
+    rawSqlite.close();
+    rawSqlite = null;
+  }
+  db = null;
+  dbPath = null;
+}
 
 export async function getDb(): Promise<BunSQLiteDatabase> {
-  if (db) return db;
+  const path = getDbPath();
+  if (db && dbPath === path) return db;
   await ensureConfigDir();
-  const sqlite = new Database(DB_PATH, { create: true });
+  const sqlite = new Database(path, { create: true });
   // Performance / safety pragmas
   sqlite.exec('PRAGMA journal_mode = WAL;');
   sqlite.exec('PRAGMA synchronous = NORMAL;');
@@ -48,6 +61,8 @@ export async function getDb(): Promise<BunSQLiteDatabase> {
       ON annotations (host_alias, repo_path, file_path);
   `);
   db = drizzle(sqlite);
+  dbPath = path;
+  rawSqlite = sqlite;
   return db;
 }
 

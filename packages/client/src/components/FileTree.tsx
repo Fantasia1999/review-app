@@ -120,6 +120,7 @@ function statusLetter(s: FileChange['status']): string {
     case 'renamed': return 'R';
     case 'untracked': return 'U';
     case 'submodule': return 'S';
+    default: return '?';
   }
 }
 

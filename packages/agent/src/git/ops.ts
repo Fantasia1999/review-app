@@ -256,7 +256,7 @@ export class GitOps {
  *   ? <path>                                                (untracked)
  *   ! <path>                                                (ignored - we don't ask for these)
  */
-function parsePorcelainV2(out: string): FileChange[] {
+export function parsePorcelainV2(out: string): FileChange[] {
   const files: FileChange[] = [];
   // Records separated by NUL, but renamed records have an embedded NUL between
   // newPath and origPath. We have to walk byte-by-byte.
@@ -332,7 +332,7 @@ function classifyXY(xy: string, sub: string): FileStatus {
 }
 
 /** Parse `git diff HEAD --numstat -z` output. */
-function parseNumstat(
+export function parseNumstat(
   out: string,
 ): Map<string, { additions: number; deletions: number; binary: boolean }> {
   const map = new Map<string, { additions: number; deletions: number; binary: boolean }>();

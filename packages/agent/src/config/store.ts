@@ -16,22 +16,36 @@ import {
   type AppConfig,
 } from '@review-app/shared';
 
-const CONFIG_DIR = join(homedir(), '.review-app');
-const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
-export const DB_PATH = join(CONFIG_DIR, 'db.sqlite');
+function configDir(): string {
+  return process.env.REVIEW_APP_CONFIG_DIR ?? join(homedir(), '.review-app');
+}
+function configPath(): string {
+  return join(configDir(), 'config.json');
+}
+export function getDbPath(): string {
+  return process.env.REVIEW_APP_DB_PATH ?? join(configDir(), 'db.sqlite');
+}
+/** @deprecated import-time constant kept for backwards compat; prefer getDbPath() */
+export const DB_PATH = getDbPath();
 
 let cached: AppConfig | null = null;
 let writeLock: Promise<void> = Promise.resolve();
 
+/** Test-only: clear in-memory cache so next load re-reads disk. */
+export function __resetConfigCacheForTests(): void {
+  cached = null;
+  writeLock = Promise.resolve();
+}
+
 export async function ensureConfigDir(): Promise<void> {
-  await mkdir(CONFIG_DIR, { recursive: true });
+  await mkdir(configDir(), { recursive: true });
 }
 
 export async function loadConfig(): Promise<AppConfig> {
   if (cached) return cached;
   await ensureConfigDir();
   try {
-    const raw = await readFile(CONFIG_PATH, 'utf8');
+    const raw = await readFile(configPath(), 'utf8');
     const parsed = JSON.parse(raw) as AppConfig;
     cached = migrate(parsed);
     return cached;
@@ -52,7 +66,7 @@ export async function saveConfig(next: AppConfig): Promise<void> {
 
 /** Atomic-ish update helper - reads, mutates, writes under a lock. */
 export async function updateConfig(
-  mutator: (c: AppConfig) => AppConfig | void,
+  mutator: (c: AppConfig) => AppConfig | void | Promise<AppConfig | void>,
 ): Promise<AppConfig> {
   // Serialize updates so concurrent route handlers don't clobber each other.
   let release!: () => void;
@@ -62,7 +76,7 @@ export async function updateConfig(
   try {
     await prevLock;
     const current = await loadConfig();
-    const out = mutator(current) ?? current;
+    const out = (await mutator(current)) ?? current;
     await persist(out);
     cached = out;
     return out;
@@ -74,25 +88,26 @@ export async function updateConfig(
 async function persist(c: AppConfig): Promise<void> {
   await ensureConfigDir();
   // Write to a temp file then rename for atomicity
-  const tmp = CONFIG_PATH + '.tmp';
+  const target = configPath();
+  const tmp = target + '.tmp';
   await writeFile(tmp, JSON.stringify(c, null, 2), 'utf8');
   // On Windows, rename will fail if target exists; remove first if needed.
   // Bun.file API would be neater but we want plain Node fs for ssh2 compat.
   try {
     const { rename, unlink } = await import('node:fs/promises');
     try {
-      await rename(tmp, CONFIG_PATH);
+      await rename(tmp, target);
     } catch {
-      await unlink(CONFIG_PATH).catch(() => {});
-      await rename(tmp, CONFIG_PATH);
+      await unlink(target).catch(() => {});
+      await rename(tmp, target);
     }
   } catch (err) {
     throw err;
   }
 }
 
-/** Apply migrations from older config versions. */
-function migrate(raw: AppConfig & { version?: number }): AppConfig {
+/** Apply migrations from older config versions. Exported for tests. */
+export function migrate(raw: AppConfig & { version?: number }): AppConfig {
   const v = raw.version ?? 0;
   // v1 is current. Add cases here as schema evolves.
   if (v === 1) return raw;

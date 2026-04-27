@@ -51,10 +51,14 @@ export function hostsRoutes(pool: ExecutorPool) {
       keyPath: body.keyPath,
       hasPassphrase: encrypted,
     };
+    const existing = await loadConfig();
+    if (existing.hosts.find((h) => h.alias === newHost.alias)) {
+      return c.json(
+        { error: `Host alias "${newHost.alias}" already exists` },
+        409,
+      );
+    }
     const updated = await updateConfig((cfg) => {
-      if (cfg.hosts.find((h) => h.alias === newHost.alias)) {
-        throw new Error(`Host alias "${newHost.alias}" already exists`);
-      }
       cfg.hosts.push(newHost);
     });
     return c.json({ host: newHost, hosts: updated.hosts });
@@ -63,10 +67,14 @@ export function hostsRoutes(pool: ExecutorPool) {
   r.put('/:alias', async (c) => {
     const alias = c.req.param('alias');
     const body = (await c.req.json()) as Partial<HostConfig>;
+    const cfgPre = await loadConfig();
+    if (!cfgPre.hosts.find((h) => h.alias === alias)) {
+      return c.json({ error: 'host not found' }, 404);
+    }
     let resolved: HostConfig | null = null;
     await updateConfig(async (cfg) => {
       const idx = cfg.hosts.findIndex((h) => h.alias === alias);
-      if (idx === -1) throw new Error('Host not found');
+      if (idx === -1) return;
       const existing = cfg.hosts[idx];
       const merged: HostConfig = {
         ...existing,

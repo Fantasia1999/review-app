@@ -44,6 +44,15 @@ export class SSHExecutor implements RemoteExecutor {
     this.connectPromise = (async () => {
       const privateKey = await readFile(this.host.keyPath);
 
+      // Pre-check: if the key is known-encrypted and we have no passphrase,
+      // short-circuit before ssh2.connect throws synchronously on some keys.
+      if (this.host.hasPassphrase && !this.passphrase) {
+        throw new RemoteExecError({
+          kind: 'ssh_passphrase_required',
+          message: 'Private key requires a passphrase',
+        });
+      }
+
       await new Promise<void>((resolve, reject) => {
         const client = new Client();
 
@@ -101,15 +110,19 @@ export class SSHExecutor implements RemoteExecutor {
           resolve();
         });
 
-        client.connect({
-          host: this.host.hostname,
-          port: this.host.port,
-          username: this.host.user,
-          privateKey,
-          passphrase: this.passphrase,
-          keepaliveInterval: 30_000,
-          readyTimeout: 15_000,
-        });
+        try {
+          client.connect({
+            host: this.host.hostname,
+            port: this.host.port,
+            username: this.host.user,
+            privateKey,
+            passphrase: this.passphrase,
+            keepaliveInterval: 30_000,
+            readyTimeout: 15_000,
+          });
+        } catch (err) {
+          onError(err as Error);
+        }
       });
     })();
 
@@ -200,14 +213,19 @@ export class SSHExecutor implements RemoteExecutor {
 
     let exitCode = 0;
     const stderrChunks: Buffer[] = [];
-    stream.stderr.on('data', (d: Buffer) => stderrChunks.push(d));
-    stream.on('close', (code) => {
-      exitCode = code ?? 0;
+    const closePromise = new Promise<void>((resolve) => {
+      stream.on('close', (code) => {
+        exitCode = code ?? 0;
+        resolve();
+      });
     });
+    stream.stderr.on('data', (d: Buffer) => stderrChunks.push(d));
 
     for await (const chunk of stream) {
       yield chunk as Uint8Array;
     }
+
+    await closePromise;
 
     if (exitCode !== 0) {
       const stderr = Buffer.concat(stderrChunks).toString('utf8');

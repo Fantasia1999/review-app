@@ -10,7 +10,7 @@
     "isolatedModules": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["bun-types"],
+    "types": ["bun"],
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["packages/shared/src/*"]

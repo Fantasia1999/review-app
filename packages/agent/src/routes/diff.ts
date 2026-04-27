@@ -90,8 +90,11 @@ export function diffRoutes(pool: ExecutorPool) {
 
 function errorResponse(c: any, err: unknown) {
   if (err instanceof RemoteExecError) {
-    // 4xx for user-correctable, 5xx for unexpected
-    const status = err.info.kind === 'ssh_passphrase_required' ? 401 : 400;
+    const k = err.info.kind;
+    let status: 400 | 401 | 404 | 500 = 400;
+    if (k === 'ssh_passphrase_required') status = 401;
+    else if (k === 'ssh_passphrase_wrong' || k === 'ssh_auth_failed') status = 401;
+    else if (k === 'not_a_repo' || k === 'path_not_found') status = 404;
     return c.json({ error: err.info }, status);
   }
   return c.json(
