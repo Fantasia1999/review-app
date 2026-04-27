@@ -43,6 +43,29 @@ bun run dev:client   # starts Vite dev server on http://127.0.0.1:5173
 
 Open http://127.0.0.1:5173 — Vite proxies `/api` to the agent.
 
+### Port already in use
+
+If `7676` or `5173` is already occupied, find the listener first and then stop
+that specific process.
+
+**Windows (PowerShell)**
+
+```powershell
+Get-NetTCPConnection -LocalPort 7676,5173 | Select-Object LocalAddress,LocalPort,State,OwningProcess
+Get-Process -Id <PID>
+Stop-Process -Id <PID>
+```
+
+**macOS**
+
+```bash
+lsof -nP -iTCP:7676 -sTCP:LISTEN
+lsof -nP -iTCP:5173 -sTCP:LISTEN
+kill <PID>
+```
+
+If you only want to inspect, skip the final stop/kill command.
+
 ## Build a single-file binary
 
 ```bash
