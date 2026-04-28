@@ -50,6 +50,11 @@ These are the rules from DESIGN.md §12, condensed:
 8. **Bump config version on schema change.** And add a migration in
    `agent/src/config/store.ts`.
 
+9. **Two-tier delete for annotations.** Review screens expose only
+   *soft-clear* (set `archived_at`). The Comments management page
+   (`#/comments`) is the *only* place that exposes hard delete. Don't
+   re-add hard delete to the review flow.
+
 ## Don't add these
 
 (From DESIGN.md §1.4 + §12.5)

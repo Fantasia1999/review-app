@@ -20,6 +20,7 @@ export const annotations = sqliteTable('annotations', {
   quotedLang: text('quoted_lang').notNull(),
   body: text('body').notNull(),
   createdAt: integer('created_at').notNull(),
+  archivedAt: integer('archived_at'),
 });
 
 export type AnnotationRow = typeof annotations.$inferSelect;

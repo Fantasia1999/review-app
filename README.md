@@ -18,6 +18,8 @@ This is the minimum tool that solves that:
 - Leave 5-line quoted markdown annotations on any code window
 - One-click copy all annotations as LLM-friendly markdown to paste into
   Claude / Cursor / ChatGPT for fixes
+- Soft-clear annotations after a review pass; manage (and hard-delete)
+  the archive from the **Manage comments** page on the home screen
 
 Remote requirements: just `git`. No daemon to install.
 

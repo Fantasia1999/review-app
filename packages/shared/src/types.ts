@@ -174,6 +174,12 @@ export interface Annotation {
   /** Markdown */
   body: string;
   createdAt: number;
+  /**
+   * If non-null, this annotation has been "cleared" (soft-deleted) at this
+   * epoch ms. Default list endpoints exclude archived rows; the Comments
+   * management page can opt in to show them. Hard delete is a separate op.
+   */
+  archivedAt?: number | null;
 }
 
 export interface CreateAnnotationInput {

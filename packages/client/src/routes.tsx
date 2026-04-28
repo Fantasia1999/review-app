@@ -19,9 +19,10 @@ import { useEffect, useState } from 'react';
 import { HostsPage } from './pages/HostsPage';
 import { RepoPickerPage } from './pages/RepoPickerPage';
 import { ReviewPage } from './pages/ReviewPage';
+import { CommentsPage } from './pages/CommentsPage';
 
 export interface RouteState {
-  view: 'hosts' | 'repo-picker' | 'review';
+  view: 'hosts' | 'repo-picker' | 'review' | 'comments';
   hostAlias?: string;
   repoPath?: string;
   filePath?: string;
@@ -37,6 +38,9 @@ export function parseHash(hash: string): RouteState {
 
   if (segs.length === 0) {
     return { view: 'hosts' };
+  }
+  if (segs[0] === 'comments') {
+    return { view: 'comments' };
   }
   if (segs[0] === 'h' && segs.length === 2) {
     return { view: 'repo-picker', hostAlias: decodeURIComponent(segs[1]) };
@@ -56,6 +60,8 @@ export function buildHash(state: RouteState): string {
   switch (state.view) {
     case 'hosts':
       return '#/';
+    case 'comments':
+      return '#/comments';
     case 'repo-picker':
       return `#/h/${encodeURIComponent(state.hostAlias!)}`;
     case 'review': {
@@ -85,6 +91,8 @@ export function Routes() {
   switch (route.view) {
     case 'hosts':
       return <HostsPage />;
+    case 'comments':
+      return <CommentsPage />;
     case 'repo-picker':
       return <RepoPickerPage hostAlias={route.hostAlias!} />;
     case 'review':

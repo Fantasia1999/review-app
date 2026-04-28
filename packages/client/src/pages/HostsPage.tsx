@@ -40,9 +40,17 @@ export function HostsPage() {
     <div className="page">
       <header className="page-header">
         <h1>Hosts</h1>
-        <button className="btn-primary" onClick={() => setShowAdd(true)}>
-          Add host
-        </button>
+        <div className="page-header-actions">
+          <button
+            className="btn-link"
+            onClick={() => navigate({ view: 'comments' })}
+          >
+            Manage comments
+          </button>
+          <button className="btn-primary" onClick={() => setShowAdd(true)}>
+            Add host
+          </button>
+        </div>
       </header>
 
       {hosts.length === 0 ? (

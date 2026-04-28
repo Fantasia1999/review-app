@@ -279,6 +279,101 @@ describe('annotations routes', () => {
     );
     expect(r.status).toBe(400);
   });
+
+  it('soft-clears, restores via PATCH, bulk-clears, and lists across repos', async () => {
+    const { app } = await buildApp();
+
+    async function mk(repo: string, file: string, body: string) {
+      const res = await app.fetch(
+        jsonReq('/api/annotations', {
+          method: 'POST',
+          body: JSON.stringify({
+            hostAlias: 'h', repoPath: repo, filePath: file, side: 'new',
+            quotedStartLine: 1, quotedLines: 'a\nb\nc\nd\ne',
+            quotedLang: 'ts', body,
+          }),
+        }),
+      );
+      return (await res.json() as any).annotation;
+    }
+
+    const a1 = await mk('/r', 'a.ts', 'one');
+    const a2 = await mk('/r', 'b.ts', 'two');
+    await mk('/other', 'c.ts', 'three');
+
+    // PATCH archived=true → row hidden from default list
+    const arch = await app.fetch(
+      jsonReq('/api/annotations/' + a1.id, {
+        method: 'PATCH',
+        body: JSON.stringify({ archived: true }),
+      }),
+    );
+    expect(arch.status).toBe(200);
+
+    const active = await app.fetch(jsonReq('/api/annotations?host=h&repo=/r'));
+    const activeBody = await active.json() as any;
+    expect(activeBody.annotations.map((x: any) => x.id)).toEqual([a2.id]);
+
+    const incArch = await app.fetch(
+      jsonReq('/api/annotations?host=h&repo=/r&includeArchived=1'),
+    );
+    expect((await incArch.json() as any).annotations).toHaveLength(2);
+
+    const onlyArch = await app.fetch(
+      jsonReq('/api/annotations?host=h&repo=/r&archivedOnly=1'),
+    );
+    const onlyArchBody = await onlyArch.json() as any;
+    expect(onlyArchBody.annotations.map((x: any) => x.id)).toEqual([a1.id]);
+
+    // PATCH archived=false → restored
+    await app.fetch(
+      jsonReq('/api/annotations/' + a1.id, {
+        method: 'PATCH',
+        body: JSON.stringify({ archived: false }),
+      }),
+    );
+    const restored = await app.fetch(jsonReq('/api/annotations?host=h&repo=/r'));
+    expect((await restored.json() as any).annotations).toHaveLength(2);
+
+    // Bulk clear /r — leaves /other untouched.
+    const clr = await app.fetch(
+      jsonReq('/api/annotations/clear', {
+        method: 'POST',
+        body: JSON.stringify({ hostAlias: 'h', repoPath: '/r' }),
+      }),
+    );
+    expect(clr.status).toBe(200);
+    expect((await clr.json() as any).archived).toBe(2);
+
+    expect((await (await app.fetch(jsonReq('/api/annotations?host=h&repo=/r'))).json() as any).annotations)
+      .toHaveLength(0);
+    expect((await (await app.fetch(jsonReq('/api/annotations?host=h&repo=/other'))).json() as any).annotations)
+      .toHaveLength(1);
+
+    // /all
+    const all = await app.fetch(jsonReq('/api/annotations/all?includeArchived=1'));
+    expect((await all.json() as any).annotations).toHaveLength(3);
+    const allActive = await app.fetch(jsonReq('/api/annotations/all'));
+    expect((await allActive.json() as any).annotations).toHaveLength(1);
+
+    // PATCH with neither body nor archived → 400
+    const bad = await app.fetch(
+      jsonReq('/api/annotations/' + a1.id, {
+        method: 'PATCH',
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(bad.status).toBe(400);
+
+    // /clear without required fields → 400
+    const badClr = await app.fetch(
+      jsonReq('/api/annotations/clear', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(badClr.status).toBe(400);
+  });
 });
 
 function createLocalRepo(): string {

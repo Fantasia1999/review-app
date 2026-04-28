@@ -21,6 +21,7 @@ import {
   useMarkRead,
   usePrefs,
   useUpdatePrefs,
+  useClearRepoAnnotations,
 } from '../api/hooks';
 import { navigate } from '../routes';
 import { FileTree } from '../components/FileTree';
@@ -44,6 +45,7 @@ export function ReviewPage({
   const prefs = usePrefs();
   const updatePrefs = useUpdatePrefs();
   const markRead = useMarkRead();
+  const clearAll = useClearRepoAnnotations();
 
   const layout = prefs.data?.prefs.annotationLayout ?? 'inline';
 
@@ -172,6 +174,26 @@ export function ReviewPage({
               repoPath={repoPath}
               annotations={annotations.data?.annotations ?? []}
             />
+            <button
+              onClick={() => {
+                const n = annotations.data?.annotations.length ?? 0;
+                if (n === 0) return;
+                if (
+                  confirm(
+                    `Clear all ${n} comments for this repo? They'll be archived (recoverable from Manage comments on the home page).`,
+                  )
+                ) {
+                  clearAll.mutate({ hostAlias, repoPath });
+                }
+              }}
+              disabled={
+                clearAll.isPending ||
+                (annotations.data?.annotations.length ?? 0) === 0
+              }
+              title="Archive every comment for this repo"
+            >
+              {clearAll.isPending ? 'Clearing…' : 'Clear all'}
+            </button>
           </div>
         </header>
 

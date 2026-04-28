@@ -218,6 +218,25 @@ export function useAnnotations(
   });
 }
 
+export function useAllAnnotations(opts: {
+  includeArchived?: boolean;
+  archivedOnly?: boolean;
+} = {}) {
+  const { includeArchived, archivedOnly } = opts;
+  return useQuery({
+    queryKey: ['annotations', 'all', { includeArchived, archivedOnly }],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (includeArchived) params.set('includeArchived', '1');
+      if (archivedOnly) params.set('archivedOnly', '1');
+      const qs = params.toString();
+      return api<{ annotations: Annotation[] }>(
+        `/api/annotations/all${qs ? `?${qs}` : ''}`,
+      );
+    },
+  });
+}
+
 export function useCreateAnnotation() {
   const qc = useQueryClient();
   return useMutation({
@@ -239,6 +258,40 @@ export function useUpdateAnnotation() {
   });
 }
 
+/**
+ * Soft-clear / restore a single annotation. Use this for the "delete"
+ * affordance on the review page — it just marks the row as archived so
+ * it can be recovered or hard-deleted later from the management page.
+ */
+export function useArchiveAnnotation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, archived }: { id: string; archived: boolean }) =>
+      apiPatch<{ ok: true }>(`/api/annotations/${id}`, { archived }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['annotations'] }),
+  });
+}
+
+/** Bulk soft-clear: archives every active comment for one repo. */
+export function useClearRepoAnnotations() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      hostAlias,
+      repoPath,
+    }: {
+      hostAlias: string;
+      repoPath: string;
+    }) =>
+      apiPost<{ ok: true; archived: number }>('/api/annotations/clear', {
+        hostAlias,
+        repoPath,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['annotations'] }),
+  });
+}
+
+/** Hard delete - only exposed from the management page. */
 export function useDeleteAnnotation() {
   const qc = useQueryClient();
   return useMutation({

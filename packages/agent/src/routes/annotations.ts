@@ -1,18 +1,24 @@
 /**
  * Annotation CRUD.
  *
- * GET    /api/annotations?host=&repo=[&file=]
+ * GET    /api/annotations?host=&repo=[&file=][&includeArchived=1][&archivedOnly=1]
+ * GET    /api/annotations/all[?includeArchived=1][&archivedOnly=1]
  * POST   /api/annotations
- * PATCH  /api/annotations/:id  - body only
- * DELETE /api/annotations/:id
+ * PATCH  /api/annotations/:id            - body and/or archived flag
+ * POST   /api/annotations/clear          - bulk soft-archive a whole repo
+ * DELETE /api/annotations/:id            - HARD delete (only used from
+ *                                          the management page)
  */
 
 import { Hono } from 'hono';
 import {
   createAnnotation,
   listAnnotations,
+  listAllAnnotations,
   deleteAnnotation,
   updateAnnotationBody,
+  setAnnotationArchived,
+  archiveAllForRepo,
 } from '../db/annotations';
 import type { CreateAnnotationInput } from '@review-app/shared';
 
@@ -26,7 +32,19 @@ export function annotationsRoutes() {
     if (!host || !repo) {
       return c.json({ error: 'host + repo required' }, 400);
     }
-    const list = await listAnnotations(host, repo, file);
+    const includeArchived = c.req.query('includeArchived') === '1';
+    const archivedOnly = c.req.query('archivedOnly') === '1';
+    const list = await listAnnotations(host, repo, file, {
+      includeArchived,
+      archivedOnly,
+    });
+    return c.json({ annotations: list });
+  });
+
+  r.get('/all', async (c) => {
+    const includeArchived = c.req.query('includeArchived') === '1';
+    const archivedOnly = c.req.query('archivedOnly') === '1';
+    const list = await listAllAnnotations({ includeArchived, archivedOnly });
     return c.json({ annotations: list });
   });
 
@@ -47,11 +65,38 @@ export function annotationsRoutes() {
     return c.json({ annotation: ann });
   });
 
+  // Bulk soft-clear: archive every comment in a repo. Defined before /:id so
+  // the literal "clear" segment doesn't collide with the param route.
+  r.post('/clear', async (c) => {
+    const { hostAlias, repoPath } = (await c.req.json()) as {
+      hostAlias?: string;
+      repoPath?: string;
+    };
+    if (!hostAlias || !repoPath) {
+      return c.json({ error: 'hostAlias + repoPath required' }, 400);
+    }
+    const archived = await archiveAllForRepo(hostAlias, repoPath);
+    return c.json({ ok: true, archived });
+  });
+
   r.patch('/:id', async (c) => {
     const id = c.req.param('id');
-    const { body } = (await c.req.json()) as { body: string };
-    if (typeof body !== 'string') return c.json({ error: 'body required' }, 400);
-    await updateAnnotationBody(id, body);
+    const payload = (await c.req.json()) as {
+      body?: string;
+      archived?: boolean;
+    };
+    if (
+      typeof payload.body !== 'string' &&
+      typeof payload.archived !== 'boolean'
+    ) {
+      return c.json({ error: 'body or archived required' }, 400);
+    }
+    if (typeof payload.body === 'string') {
+      await updateAnnotationBody(id, payload.body);
+    }
+    if (typeof payload.archived === 'boolean') {
+      await setAnnotationArchived(id, payload.archived);
+    }
     return c.json({ ok: true });
   });
 

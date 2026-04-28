@@ -49,4 +49,9 @@ describe('parseHash', () => {
   it('falls back to hosts for unknown shapes', () => {
     expect(parseHash('#/garbage').view).toBe('hosts');
   });
+
+  it('round-trips the comments view', () => {
+    expect(parseHash('#/comments').view).toBe('comments');
+    expect(buildHash({ view: 'comments' })).toBe('#/comments');
+  });
 });

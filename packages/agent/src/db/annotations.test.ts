@@ -66,4 +66,62 @@ describe('annotations db', () => {
     const afterDel = await annotations.listAnnotations('h', '/r');
     expect(afterDel.find((x) => x.id === a2.id)).toBeUndefined();
   });
+
+  it('archives, restores, and bulk-clears without hard-deleting', async () => {
+    const annotations = await import('./annotations');
+    const cfg = await import('../config/store');
+    cfg.__resetConfigCacheForTests();
+
+    const a1 = await annotations.createAnnotation({
+      hostAlias: 'h', repoPath: '/r', filePath: 'a.ts', side: 'new',
+      quotedStartLine: 1, quotedLines: '1\n2\n3\n4\n5', quotedLang: 'ts',
+      body: 'one',
+    });
+    const a2 = await annotations.createAnnotation({
+      hostAlias: 'h', repoPath: '/r', filePath: 'b.ts', side: 'new',
+      quotedStartLine: 1, quotedLines: '1\n2\n3\n4\n5', quotedLang: 'ts',
+      body: 'two',
+    });
+    const a3 = await annotations.createAnnotation({
+      hostAlias: 'h', repoPath: '/other', filePath: 'c.ts', side: 'new',
+      quotedStartLine: 1, quotedLines: '1\n2\n3\n4\n5', quotedLang: 'ts',
+      body: 'other-repo',
+    });
+
+    // Archive a1 individually
+    await annotations.setAnnotationArchived(a1.id, true);
+    const active = await annotations.listAnnotations('h', '/r');
+    expect(active.map((x) => x.id)).toEqual([a2.id]);
+
+    const withArchived = await annotations.listAnnotations('h', '/r', undefined, {
+      includeArchived: true,
+    });
+    expect(withArchived).toHaveLength(2);
+    expect(withArchived.find((x) => x.id === a1.id)?.archivedAt).toBeTypeOf('number');
+
+    const onlyArchived = await annotations.listAnnotations('h', '/r', undefined, {
+      archivedOnly: true,
+    });
+    expect(onlyArchived.map((x) => x.id)).toEqual([a1.id]);
+
+    // Restore
+    await annotations.setAnnotationArchived(a1.id, false);
+    const afterRestore = await annotations.listAnnotations('h', '/r');
+    expect(afterRestore.map((x) => x.id).sort()).toEqual([a1.id, a2.id].sort());
+
+    // Bulk clear /r — must not touch /other
+    const cleared = await annotations.archiveAllForRepo('h', '/r');
+    expect(cleared).toBe(2);
+    expect(await annotations.listAnnotations('h', '/r')).toHaveLength(0);
+    expect(await annotations.listAnnotations('h', '/other')).toHaveLength(1);
+
+    // Calling clear again is a no-op (everything's already archived).
+    expect(await annotations.archiveAllForRepo('h', '/r')).toBe(0);
+
+    // listAllAnnotations across hosts/repos
+    const all = await annotations.listAllAnnotations({ includeArchived: true });
+    expect(all).toHaveLength(3);
+    const activeAll = await annotations.listAllAnnotations();
+    expect(activeAll.map((x) => x.id)).toEqual([a3.id]);
+  });
 });

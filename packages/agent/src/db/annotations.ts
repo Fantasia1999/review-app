@@ -7,7 +7,7 @@
 
 import { Database } from 'bun:sqlite';
 import { drizzle, type BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, isNull, isNotNull } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import type {
   Annotation,
@@ -53,13 +53,22 @@ export async function getDb(): Promise<BunSQLiteDatabase> {
       quoted_lines TEXT NOT NULL,
       quoted_lang TEXT NOT NULL,
       body TEXT NOT NULL,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      archived_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_ann_repo
       ON annotations (host_alias, repo_path);
     CREATE INDEX IF NOT EXISTS idx_ann_file
       ON annotations (host_alias, repo_path, file_path);
   `);
+  // Migration: add archived_at to pre-existing DBs that didn't have it.
+  // SQLite has no IF NOT EXISTS for ADD COLUMN, so we catch the duplicate-column error.
+  try {
+    sqlite.exec('ALTER TABLE annotations ADD COLUMN archived_at INTEGER');
+  } catch (err) {
+    const msg = (err as Error).message ?? '';
+    if (!/duplicate column/i.test(msg)) throw err;
+  }
   db = drizzle(sqlite);
   dbPath = path;
   rawSqlite = sqlite;
@@ -81,38 +90,112 @@ export async function createAnnotation(
     quotedLang: input.quotedLang,
     body: input.body,
     createdAt: Date.now(),
+    archivedAt: null,
   };
   await d.insert(annotations).values(row);
   return rowToAnnotation(row);
+}
+
+export interface ListAnnotationsOptions {
+  /** If true, archived rows are included alongside non-archived. */
+  includeArchived?: boolean;
+  /** If true, ONLY archived rows are returned. Wins over includeArchived. */
+  archivedOnly?: boolean;
 }
 
 export async function listAnnotations(
   hostAlias: string,
   repoPath: string,
   filePath?: string,
+  opts: ListAnnotationsOptions = {},
 ): Promise<Annotation[]> {
   const d = await getDb();
-  const where = filePath
-    ? and(
-        eq(annotations.hostAlias, hostAlias),
-        eq(annotations.repoPath, repoPath),
-        eq(annotations.filePath, filePath),
-      )
-    : and(
-        eq(annotations.hostAlias, hostAlias),
-        eq(annotations.repoPath, repoPath),
-      );
+  const filters = [
+    eq(annotations.hostAlias, hostAlias),
+    eq(annotations.repoPath, repoPath),
+  ];
+  if (filePath) filters.push(eq(annotations.filePath, filePath));
+  if (opts.archivedOnly) {
+    filters.push(isNotNull(annotations.archivedAt));
+  } else if (!opts.includeArchived) {
+    filters.push(isNull(annotations.archivedAt));
+  }
   const rows = await d
     .select()
     .from(annotations)
-    .where(where)
+    .where(and(...filters))
     .orderBy(desc(annotations.createdAt));
+  return rows.map(rowToAnnotation);
+}
+
+/** List annotations across all hosts/repos. Used by the management page. */
+export async function listAllAnnotations(
+  opts: ListAnnotationsOptions = {},
+): Promise<Annotation[]> {
+  const d = await getDb();
+  const filters = [];
+  if (opts.archivedOnly) {
+    filters.push(isNotNull(annotations.archivedAt));
+  } else if (!opts.includeArchived) {
+    filters.push(isNull(annotations.archivedAt));
+  }
+  const q = d.select().from(annotations);
+  const rows = filters.length
+    ? await q.where(and(...filters)).orderBy(desc(annotations.createdAt))
+    : await q.orderBy(desc(annotations.createdAt));
   return rows.map(rowToAnnotation);
 }
 
 export async function deleteAnnotation(id: string): Promise<void> {
   const d = await getDb();
   await d.delete(annotations).where(eq(annotations.id, id));
+}
+
+/** Soft-clear a single annotation (mark archived). Idempotent. */
+export async function setAnnotationArchived(
+  id: string,
+  archived: boolean,
+): Promise<void> {
+  const d = await getDb();
+  await d
+    .update(annotations)
+    .set({ archivedAt: archived ? Date.now() : null })
+    .where(eq(annotations.id, id));
+}
+
+/**
+ * Bulk soft-clear: archive every non-archived annotation belonging to
+ * (hostAlias, repoPath). Returns the number of rows affected.
+ */
+export async function archiveAllForRepo(
+  hostAlias: string,
+  repoPath: string,
+): Promise<number> {
+  const d = await getDb();
+  // Count what we're about to flip so we can return a meaningful number
+  // without relying on drizzle's run() result shape across adapters.
+  const pending = await d
+    .select({ id: annotations.id })
+    .from(annotations)
+    .where(
+      and(
+        eq(annotations.hostAlias, hostAlias),
+        eq(annotations.repoPath, repoPath),
+        isNull(annotations.archivedAt),
+      ),
+    );
+  if (pending.length === 0) return 0;
+  await d
+    .update(annotations)
+    .set({ archivedAt: Date.now() })
+    .where(
+      and(
+        eq(annotations.hostAlias, hostAlias),
+        eq(annotations.repoPath, repoPath),
+        isNull(annotations.archivedAt),
+      ),
+    );
+  return pending.length;
 }
 
 export async function updateAnnotationBody(
@@ -135,5 +218,6 @@ function rowToAnnotation(row: typeof annotations.$inferSelect): Annotation {
     quotedLang: row.quotedLang,
     body: row.body,
     createdAt: row.createdAt,
+    archivedAt: row.archivedAt ?? null,
   };
 }

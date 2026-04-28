@@ -258,6 +258,32 @@ Implications:
 This simplification is the largest one in the design and not negotiable
 without good reason — the user explicitly chose this tradeoff.
 
+#### 4.3.1 Soft-clear vs hard-delete
+
+After a review pass, annotations are usually disposable but the user
+shouldn't lose them by accident. Two-tier delete:
+
+- **Review screens** (`ReviewPage`, `AnnotationCard mode="review"`)
+  expose only **soft-clear** (archive). The "×" button on a card and
+  the "Clear all" button on the review header both set
+  `annotations.archived_at = now` rather than deleting the row.
+- **Manage comments page** (`#/comments`, `AnnotationCard mode="manage"`)
+  is the *only* place that exposes **hard delete** and **restore**.
+  A radio filter (Active / Cleared / All) controls which rows show.
+
+Schema: `annotations.archived_at INTEGER NULL` (epoch ms). Rows with
+non-null `archived_at` are hidden from the review flow by default.
+`listAnnotations` and `listAllAnnotations` accept
+`{ includeArchived?, archivedOnly? }`; `archivedOnly` wins if both set.
+
+API surface:
+
+- `GET    /api/annotations?host=&repo=[&file=][&includeArchived=1][&archivedOnly=1]`
+- `GET    /api/annotations/all[?includeArchived=1][&archivedOnly=1]`
+- `PATCH  /api/annotations/:id`  body `{ body?, archived? }` — at least one required
+- `POST   /api/annotations/clear` body `{ hostAlias, repoPath }` → `{ ok, archived }`
+- `DELETE /api/annotations/:id` — hard delete, exposed in the manage UI only
+
 ### 4.4 Read marks: hash-based invalidation
 
 A "read mark" is keyed by `(host, repo, file_path, content_hash)`. When
