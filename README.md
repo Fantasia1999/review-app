@@ -12,7 +12,7 @@ You SSH into a dev box, edit code there, want to review your uncommitted
 changes before committing — but running VSCode Remote feels too heavy.
 This is the minimum tool that solves that:
 
-- Pick a host (local machine, SSH key auth, or SSH password auth)
+- Pick a host (local machine, WSL distro on Windows, SSH key auth, or SSH password auth)
 - Pick a repo path on that host or machine
 - See `git diff HEAD` rendered with [@pierre/diffs](https://diffs.com)
 - Leave 5-line quoted markdown annotations on any code window
@@ -109,6 +109,7 @@ Move/sync these files manually if you want to share state across machines.
 1. Run the binary. Browser opens to the host list.
 2. Click "Add host". Choose either:
    - **Local machine** for a repo on your own disk
+   - **WSL (Windows)** to run git inside a WSL distro on this machine
    - **SSH host** with either private-key auth or password auth
 3. Click your host. If the SSH host needs a password or key passphrase,
    enter it when prompted.

@@ -10,11 +10,22 @@
 export interface BaseHostConfig {
   /** UI display name + lookup key */
   alias: string;
-  kind: 'local' | 'ssh';
+  kind: 'local' | 'ssh' | 'wsl';
 }
 
 export interface LocalHostConfig extends BaseHostConfig {
   kind: 'local';
+}
+
+/**
+ * A directory inside a WSL distro on Windows. Commands run via `wsl.exe -d <distro>`,
+ * so the remote requirement (just `git`) applies to the WSL distro, not Windows itself.
+ * Paths are POSIX, evaluated inside the distro.
+ */
+export interface WslHostConfig extends BaseHostConfig {
+  kind: 'wsl';
+  /** WSL distribution name, e.g. "Ubuntu" or "Debian". */
+  distro: string;
 }
 
 export interface SshHostConfigBase extends BaseHostConfig {
@@ -38,11 +49,17 @@ export interface SshPasswordHostConfig extends SshHostConfigBase {
 }
 
 export type SshHostConfig = SshKeyHostConfig | SshPasswordHostConfig;
-export type HostConfig = LocalHostConfig | SshHostConfig;
+export type HostConfig = LocalHostConfig | SshHostConfig | WslHostConfig;
 
 export interface CreateLocalHostInput {
   alias: string;
   kind: 'local';
+}
+
+export interface CreateWslHostInput {
+  alias: string;
+  kind: 'wsl';
+  distro: string;
 }
 
 export interface CreateSshKeyHostInput {
@@ -69,7 +86,8 @@ export interface CreateSshPasswordHostInput {
 export type CreateHostInput =
   | CreateLocalHostInput
   | CreateSshKeyHostInput
-  | CreateSshPasswordHostInput;
+  | CreateSshPasswordHostInput
+  | CreateWslHostInput;
 
 export interface HostStatus {
   alias: string;
@@ -209,7 +227,7 @@ export interface ReadMark {
 // ============================================================
 
 export interface AppConfig {
-  version: 2;
+  version: 3;
   hosts: HostConfig[];
   recentRepos: Record<string, RepoEntry[]>; // hostAlias -> recent repos
   readMarks: ReadMark[];
@@ -221,7 +239,7 @@ export interface AppConfig {
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
-  version: 2,
+  version: 3,
   hosts: [],
   recentRepos: {},
   readMarks: [],

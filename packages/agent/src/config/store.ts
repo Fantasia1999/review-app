@@ -126,6 +126,9 @@ function migrateHost(host: HostConfig | LegacyV1HostConfig): HostConfig {
     if (host.kind === 'local') {
       return { alias: host.alias, kind: 'local' };
     }
+    if (host.kind === 'wsl') {
+      return { alias: host.alias, kind: 'wsl', distro: host.distro };
+    }
     if (host.auth === 'password') {
       return {
         alias: host.alias,
@@ -162,40 +165,16 @@ function migrateHost(host: HostConfig | LegacyV1HostConfig): HostConfig {
 /** Apply migrations from older config versions. Exported for tests. */
 export function migrate(raw: RawConfig): AppConfig {
   const v = raw.version ?? 0;
-  if (v > 2) return raw as AppConfig;
+  if (v > 3) return raw as AppConfig;
 
-  if (v === 2) {
-    return {
-      ...DEFAULT_CONFIG,
-      ...raw,
-      version: 2,
-      hosts: (raw.hosts ?? []).map(migrateHost),
-      recentRepos: raw.recentRepos ?? {},
-      readMarks: raw.readMarks ?? [],
-      ui: { ...DEFAULT_CONFIG.ui, ...(raw.ui ?? {}) },
-    };
-  }
-
-  if (v === 1) {
-    return {
-      ...DEFAULT_CONFIG,
-      ...raw,
-      version: 2,
-      hosts: (raw.hosts ?? []).map(migrateHost),
-      recentRepos: raw.recentRepos ?? {},
-      readMarks: raw.readMarks ?? [],
-      ui: { ...DEFAULT_CONFIG.ui, ...(raw.ui ?? {}) },
-    };
-  }
-  // Unknown future version - just trust it (forward compat)
-  // Pre-v1: shouldn't happen unless someone manually edited the file
-  return {
+  const upgraded: AppConfig = {
     ...DEFAULT_CONFIG,
     ...raw,
-    version: 2,
+    version: 3,
     hosts: (raw.hosts ?? []).map(migrateHost),
     recentRepos: raw.recentRepos ?? {},
     readMarks: raw.readMarks ?? [],
     ui: { ...DEFAULT_CONFIG.ui, ...(raw.ui ?? {}) },
   };
+  return upgraded;
 }

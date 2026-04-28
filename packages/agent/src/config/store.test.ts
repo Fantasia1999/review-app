@@ -29,7 +29,7 @@ describe('config store', () => {
   it('creates a default config when file is missing', async () => {
     const store = await freshStore();
     const cfg = await store.loadConfig();
-    expect(cfg.version).toBe(2);
+    expect(cfg.version).toBe(3);
     expect(cfg.hosts).toEqual([]);
     expect(cfg.ui.annotationLayout).toBe('inline');
   });
@@ -102,15 +102,15 @@ describe('config store', () => {
 });
 
 describe('migrate', () => {
-  it('upgrades a missing version to v2 with defaults', async () => {
+  it('upgrades a missing version to v3 with defaults', async () => {
     const store = await freshStore();
     const out = store.migrate({ hosts: [] } as any);
-    expect(out.version).toBe(2);
+    expect(out.version).toBe(3);
     expect(out.ui).toBeDefined();
     expect(out.recentRepos).toEqual({});
   });
 
-  it('migrates v1 SSH key hosts to v2', async () => {
+  it('migrates v1 SSH key hosts to v3', async () => {
     const store = await freshStore();
     const cfg = {
       version: 1 as const,
@@ -120,7 +120,7 @@ describe('migrate', () => {
       ui: { theme: 'dark' as const, annotationLayout: 'sidebar' as const, fileTreeMode: 'tree' as const },
     };
     const out = store.migrate(cfg);
-    expect(out.version).toBe(2);
+    expect(out.version).toBe(3);
     expect(out.hosts[0]).toEqual({
       alias: 'pre',
       kind: 'ssh',
@@ -133,11 +133,14 @@ describe('migrate', () => {
     });
   });
 
-  it('passes through v2 unchanged', async () => {
+  it('passes through v3 unchanged', async () => {
     const store = await freshStore();
     const cfg = {
-      version: 2 as const,
-      hosts: [{ alias: 'local', kind: 'local' as const }],
+      version: 3 as const,
+      hosts: [
+        { alias: 'local', kind: 'local' as const },
+        { alias: 'wsl-ub', kind: 'wsl' as const, distro: 'Ubuntu' },
+      ],
       recentRepos: {},
       readMarks: [],
       ui: { theme: 'dark' as const, annotationLayout: 'sidebar' as const, fileTreeMode: 'tree' as const },

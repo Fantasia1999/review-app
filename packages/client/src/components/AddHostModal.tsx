@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import type { CreateHostInput } from '@shared/types';
-import { useAddHost, useLocalKeys } from '../api/hooks';
+import { useAddHost, useLocalKeys, useWslDistros } from '../api/hooks';
 
 export function AddHostModal({ onClose }: { onClose: () => void }) {
   const [alias, setAlias] = useState('');
-  const [kind, setKind] = useState<'ssh' | 'local'>('ssh');
+  const [kind, setKind] = useState<'ssh' | 'local' | 'wsl'>('ssh');
   const [auth, setAuth] = useState<'key' | 'password'>('key');
   const [hostname, setHostname] = useState('');
   const [user, setUser] = useState('');
@@ -12,11 +12,14 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
   const [keyPath, setKeyPath] = useState('');
   const [password, setPassword] = useState('');
   const [customKey, setCustomKey] = useState(false);
+  const [distro, setDistro] = useState('');
   const keys = useLocalKeys();
+  const wsl = useWslDistros();
   const addHost = useAddHost();
   const [err, setErr] = useState<string | null>(null);
 
   const isLocal = kind === 'local';
+  const isWsl = kind === 'wsl';
   const isPassword = kind === 'ssh' && auth === 'password';
   const isKey = kind === 'ssh' && auth === 'key';
 
@@ -25,25 +28,27 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
     setErr(null);
     const payload: CreateHostInput = isLocal
       ? { alias, kind: 'local' }
-      : isPassword
-        ? {
-            alias,
-            kind: 'ssh',
-            auth: 'password',
-            hostname,
-            user,
-            port,
-            password,
-          }
-        : {
-            alias,
-            kind: 'ssh',
-            auth: 'key',
-            hostname,
-            user,
-            port,
-            keyPath,
-          };
+      : isWsl
+        ? { alias, kind: 'wsl', distro }
+        : isPassword
+          ? {
+              alias,
+              kind: 'ssh',
+              auth: 'password',
+              hostname,
+              user,
+              port,
+              password,
+            }
+          : {
+              alias,
+              kind: 'ssh',
+              auth: 'key',
+              hostname,
+              user,
+              port,
+              keyPath,
+            };
     try {
       await addHost.mutateAsync(payload);
       onClose();
@@ -55,6 +60,7 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
   const canSave =
     !!alias &&
     (isLocal ||
+      (isWsl ? !!distro : false) ||
       (!!hostname && !!user && (isPassword ? !!password : !!keyPath)));
 
   return (
@@ -83,14 +89,17 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
             Connection type
             <select
               value={kind}
-              onChange={(e) => setKind(e.target.value as 'ssh' | 'local')}
+              onChange={(e) =>
+                setKind(e.target.value as 'ssh' | 'local' | 'wsl')
+              }
             >
               <option value="ssh">SSH host</option>
               <option value="local">Local machine</option>
+              <option value="wsl">WSL (Windows)</option>
             </select>
           </label>
 
-          {!isLocal && (
+          {!isLocal && !isWsl && (
             <>
               <label>
                 Hostname
@@ -205,6 +214,43 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
             <div className="hint">
               Opens git repositories from this machine&apos;s local disk.
             </div>
+          )}
+
+          {isWsl && (
+            <>
+              <label>
+                Distribution
+                {wsl.data && wsl.data.distros.length > 0 ? (
+                  <select
+                    value={distro}
+                    onChange={(e) => setDistro(e.target.value)}
+                    required
+                  >
+                    <option value="">Select a distribution…</option>
+                    {wsl.data.distros.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={distro}
+                    onChange={(e) => setDistro(e.target.value)}
+                    placeholder="Ubuntu"
+                    required
+                  />
+                )}
+              </label>
+              <div className="hint small">
+                {wsl.data?.available === false
+                  ? 'WSL is only available on Windows. The host will not work on this machine.'
+                  : wsl.data && wsl.data.distros.length === 0
+                    ? 'No WSL distributions detected. Install one with `wsl --install` first.'
+                    : 'Runs git inside the chosen WSL distro via wsl.exe. Use POSIX paths like /home/me/proj.'}
+              </div>
+            </>
           )}
 
           {err && <div className="error-box">{err}</div>}

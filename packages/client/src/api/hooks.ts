@@ -44,6 +44,15 @@ export function useLocalKeys() {
   });
 }
 
+export function useWslDistros() {
+  return useQuery({
+    queryKey: ['hosts', 'wsl-distros'],
+    queryFn: () =>
+      api<{ distros: string[]; available: boolean }>('/api/hosts/wsl-distros'),
+    staleTime: 5 * 60_000,
+  });
+}
+
 export function useAddHost() {
   const qc = useQueryClient();
   return useMutation({

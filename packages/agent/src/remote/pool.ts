@@ -6,10 +6,11 @@
  * for the lifetime of the agent process. Secrets are never written to disk.
  */
 
-import type { HostConfig, SshHostConfig } from '@review-app/shared';
+import type { HostConfig, SshHostConfig, WslHostConfig } from '@review-app/shared';
 import type { RemoteExecutor } from './executor';
 import { SSHExecutor } from './ssh-executor';
 import { LocalExecutor } from './local-executor';
+import { WslExecutor } from './wsl-executor';
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 min
 
@@ -56,7 +57,9 @@ export class ExecutorPool {
     const executor =
       host.kind === 'local'
         ? new LocalExecutor()
-        : new SSHExecutor(host as SshHostConfig, secret);
+        : host.kind === 'wsl'
+          ? new WslExecutor((host as WslHostConfig).distro)
+          : new SSHExecutor(host as SshHostConfig, secret);
     const entry: PoolEntry = {
       executor,
       lastUsed: Date.now(),

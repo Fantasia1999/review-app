@@ -16,6 +16,7 @@ import { loadConfig, updateConfig } from '../config/store';
 import { detectEncrypted, scanLocalKeys } from '../config/keys';
 import type { ExecutorPool } from '../remote/pool';
 import { RemoteExecError } from '../remote/executor';
+import { listWslDistros } from '../remote/wsl-executor';
 import type {
   CreateHostInput,
   HostConfig,
@@ -42,6 +43,11 @@ export function hostsRoutes(pool: ExecutorPool) {
   r.get('/keys', async (c) => {
     const keys = await scanLocalKeys();
     return c.json({ keys });
+  });
+
+  r.get('/wsl-distros', async (c) => {
+    const distros = await listWslDistros();
+    return c.json({ distros, available: process.platform === 'win32' });
   });
 
   r.post('/', async (c) => {
@@ -158,6 +164,13 @@ async function parseCreateHost(
   if (body.kind === 'local') {
     return { ok: true, host: { alias: body.alias, kind: 'local' } };
   }
+  if (body.kind === 'wsl') {
+    if (!body.distro) return { ok: false, error: 'distro is required' };
+    return {
+      ok: true,
+      host: { alias: body.alias, kind: 'wsl', distro: body.distro },
+    };
+  }
   if (body.kind !== 'ssh' || !body.hostname || !body.user) {
     return { ok: false, error: 'alias, hostname and user are required' };
   }
@@ -207,6 +220,16 @@ async function parseUpdateHost(
   };
   if (kind === 'local') {
     return { ok: true, host: { alias: existing.alias, kind: 'local' } };
+  }
+  if (kind === 'wsl') {
+    const wslBody = body as Partial<Extract<CreateHostInput, { kind: 'wsl' }>>;
+    const distro =
+      wslBody.distro ?? (existing.kind === 'wsl' ? existing.distro : undefined);
+    if (!distro) return { ok: false, error: 'distro is required' };
+    return {
+      ok: true,
+      host: { alias: existing.alias, kind: 'wsl', distro },
+    };
   }
 
   const sshExisting = existing.kind === 'ssh' ? existing : null;

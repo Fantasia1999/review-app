@@ -106,7 +106,9 @@ function HostCard({
         <div className="host-conn">
           {host.kind === 'local'
             ? 'Local machine'
-            : `${host.user}@${host.hostname}:${host.port}`}
+            : host.kind === 'wsl'
+              ? `WSL · ${host.distro}`
+              : `${host.user}@${host.hostname}:${host.port}`}
         </div>
         {host.kind === 'ssh' && host.auth === 'key' && (
           <div className="host-key">
