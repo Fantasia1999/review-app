@@ -165,6 +165,14 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.2);
 }
 
+.input-invalid {
+  border-color: var(--danger);
+}
+
+.input-invalid:focus {
+  box-shadow: 0 0 0 3px rgba(207, 34, 46, 0.2);
+}
+
 textarea {
   font-family: var(--mono);
   resize: vertical;
@@ -258,6 +266,13 @@ label textarea {
   color: var(--text);
   max-height: 200px;
   overflow: auto;
+}
+
+.field-error {
+  margin-top: 4px;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: normal;
 }
 
 /* ============ Hosts page ============ */
@@ -693,7 +708,8 @@ label textarea {
   max-height: 80vh;
   font-family: var(--mono);
   font-size: 12px;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ============ Annotations ============ */

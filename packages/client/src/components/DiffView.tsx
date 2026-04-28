@@ -93,6 +93,7 @@ export function DiffView({
   // library doesn't tear down the InteractionManager.
   const options = useMemo(
     () => ({
+      overflow: 'wrap' as const,
       onLineClick: (props: {
         annotationSide: 'deletions' | 'additions';
         lineNumber: number;

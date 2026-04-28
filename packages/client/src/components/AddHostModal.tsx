@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CreateHostInput } from '@shared/types';
 import { useAddHost, useLocalKeys, useWslDistros } from '../api/hooks';
+import { ApiError } from '../api/client';
 
 export function AddHostModal({ onClose }: { onClose: () => void }) {
   const [alias, setAlias] = useState('');
@@ -16,6 +17,7 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
   const keys = useLocalKeys();
   const wsl = useWslDistros();
   const addHost = useAddHost();
+  const [aliasErr, setAliasErr] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const isLocal = kind === 'local';
@@ -25,6 +27,7 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAliasErr(null);
     setErr(null);
     const payload: CreateHostInput = isLocal
       ? { alias, kind: 'local' }
@@ -53,6 +56,10 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
       await addHost.mutateAsync(payload);
       onClose();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        setAliasErr(e.info.message);
+        return;
+      }
       setErr(e instanceof Error ? e.message : String(e));
     }
   };
@@ -78,11 +85,17 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
             <input
               type="text"
               value={alias}
-              onChange={(e) => setAlias(e.target.value)}
+              onChange={(e) => {
+                setAlias(e.target.value);
+                if (aliasErr) setAliasErr(null);
+              }}
               required
               autoFocus
               placeholder={isLocal ? 'local' : 'dev-box'}
+              aria-invalid={aliasErr ? 'true' : 'false'}
+              className={aliasErr ? 'input-invalid' : undefined}
             />
+            {aliasErr && <div className="field-error">{aliasErr}</div>}
           </label>
 
           <label>

@@ -15,6 +15,28 @@ export class ApiError extends Error {
   }
 }
 
+function toRemoteError(body: unknown, text: string, status: number): RemoteError {
+  const error = (body as { error?: unknown } | null | undefined)?.error;
+  if (typeof error === 'string') {
+    return {
+      kind: 'unknown',
+      message: error,
+    };
+  }
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof (error as { message: unknown }).message === 'string'
+  ) {
+    return error as RemoteError;
+  }
+  return {
+    kind: 'unknown',
+    message: text || `HTTP ${status}`,
+  };
+}
+
 export async function api<T>(
   path: string,
   init?: RequestInit,
@@ -34,10 +56,7 @@ export async function api<T>(
     // non-JSON response
   }
   if (!res.ok) {
-    const err: RemoteError = body?.error ?? {
-      kind: 'unknown',
-      message: text || `HTTP ${res.status}`,
-    };
+    const err = toRemoteError(body, text, res.status);
     throw new ApiError(err, res.status);
   }
   return body as T;
