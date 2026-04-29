@@ -6,7 +6,7 @@
  * the `options` prop (see @pierre/diffs InteractionManagerBaseOptions).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PatchDiff } from '@pierre/diffs/react';
 import type { Annotation, FileChange } from '@shared/types';
 import { useFileDiff, useFileContent } from '../api/hooks';
@@ -26,8 +26,11 @@ interface Props {
 interface PendingAnnotation {
   side: 'old' | 'new';
   startLine: number;
-  quotedLines: string;
-  quotedLang: string;
+}
+
+interface HoveredDiffLine {
+  lineNumber: number;
+  side: 'additions' | 'deletions';
 }
 
 export function DiffView({
@@ -42,7 +45,7 @@ export function DiffView({
   const [expanded, setExpanded] = useState(false);
   const [pending, setPending] = useState<PendingAnnotation | null>(null);
   // Lazily fetch file contents only when user starts an annotation, so we
-  // can resolve a 5-line quote block on either side of the diff.
+  // can resolve the quote block on either side of the diff.
   const [needContent, setNeedContent] = useState<{ side: 'old' | 'new' } | null>(null);
   const newContent = useFileContent(
     hostAlias,
@@ -76,24 +79,18 @@ export function DiffView({
     return () => el.removeEventListener('scroll', handler);
   }, [contentHash, onMarkRead]);
 
-  // Populate quote when content arrives
-  useEffect(() => {
-    if (!pending || pending.quotedLines) return;
-    const src =
-      pending.side === 'new' ? newContent.data?.content : oldContent.data?.content;
-    if (src === undefined) return;
-    const lines = src.split('\n');
-    const start = pending.startLine;
-    const slice = lines.slice(start - 1, start - 1 + 5);
-    while (slice.length < 5) slice.push('');
-    setPending({ ...pending, quotedLines: slice.join('\n') });
-  }, [pending, newContent.data, oldContent.data]);
+  const startAnnotation = useCallback((side: 'old' | 'new', clickedLine: number) => {
+    setNeedContent({ side });
+    const startLine = Math.max(1, clickedLine - 2);
+    setPending({ side, startLine });
+  }, []);
 
   // PatchDiff options must be referentially stable across renders so the
   // library doesn't tear down the InteractionManager.
   const options = useMemo(
     () => ({
       overflow: 'wrap' as const,
+      enableGutterUtility: true,
       onLineClick: (props: {
         annotationSide: 'deletions' | 'additions';
         lineNumber: number;
@@ -103,20 +100,61 @@ export function DiffView({
         startAnnotation(side, props.lineNumber);
       },
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lang],
+    [startAnnotation],
   );
 
-  function startAnnotation(side: 'old' | 'new', clickedLine: number) {
-    setNeedContent({ side });
-    const startLine = Math.max(1, clickedLine - 2);
-    setPending({
-      side,
-      startLine,
-      quotedLines: '',
-      quotedLang: lang,
-    });
-  }
+  const renderGutterUtility = useCallback(
+    (getHoveredLine: () => HoveredDiffLine | undefined) => {
+      const hovered = getHoveredLine();
+      if (!hovered) return null;
+      return (
+        <button
+          type="button"
+          className="diff-add-annotation-btn"
+          title={`Add annotation at line ${hovered.lineNumber}`}
+          aria-label={`Add annotation at line ${hovered.lineNumber}`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            startAnnotation(
+              hovered.side === 'additions' ? 'new' : 'old',
+              hovered.lineNumber,
+            );
+          }}
+        >
+          +
+        </button>
+      );
+    },
+    [startAnnotation],
+  );
+
+  // Bail out of the editor if file-content fetch fails — the global toast
+  // already surfaced the error; without this the loading overlay would
+  // be stuck forever.
+  useEffect(() => {
+    if (!pending) return;
+    const fetcher = pending.side === 'new' ? newContent : oldContent;
+    if (fetcher.error) {
+      setPending(null);
+      setNeedContent(null);
+    }
+  }, [pending, newContent.error, oldContent.error]);
+
+  // The `c` shortcut on ReviewPage dispatches this to open the editor on the
+  // first changed line of the current file (defaulting to the new side).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ filePath: string }>).detail;
+      if (detail?.filePath !== file.path) return;
+      // Pick the first hunk's starting line if we have a parsed patch; fall
+      // back to line 1 otherwise. We don't parse the patch here, so 1 is fine.
+      const side: 'old' | 'new' = file.status === 'deleted' ? 'old' : 'new';
+      startAnnotation(side, 1);
+    };
+    window.addEventListener('review-app:annotate-current', handler);
+    return () => window.removeEventListener('review-app:annotate-current', handler);
+  }, [file.path, file.status]);
 
   if (diff.isLoading) return <div className="loading">Loading diff…</div>;
   if (diff.error) {
@@ -180,6 +218,7 @@ export function DiffView({
           patch={fd.patch}
           options={options as never}
           renderHeaderPrefix={() => file.path}
+          renderGutterUtility={renderGutterUtility}
         />
 
         {layout === 'inline' && annotations.length > 0 && (
@@ -194,21 +233,30 @@ export function DiffView({
         )}
       </div>
 
-      {pending && pending.quotedLines && (
-        <AnnotationEditor
-          hostAlias={hostAlias}
-          repoPath={repoPath}
-          filePath={file.path}
-          side={pending.side}
-          quotedStartLine={pending.startLine}
-          quotedLines={pending.quotedLines}
-          quotedLang={pending.quotedLang}
-          onClose={() => {
-            setPending(null);
-            setNeedContent(null);
-          }}
-        />
-      )}
+      {pending && (() => {
+        const fetcher = pending.side === 'new' ? newContent : oldContent;
+        if (fetcher.error) return null; // effect above will clear pending
+        const src = fetcher.data?.content;
+        if (src === undefined) {
+          return <div className="loading-overlay">Loading file…</div>;
+        }
+        const sourceLines = src.split('\n');
+        return (
+          <AnnotationEditor
+            hostAlias={hostAlias}
+            repoPath={repoPath}
+            filePath={file.path}
+            side={pending.side}
+            initialStartLine={pending.startLine}
+            sourceLines={sourceLines}
+            quotedLang={lang}
+            onClose={() => {
+              setPending(null);
+              setNeedContent(null);
+            }}
+          />
+        );
+      })()}
     </>
   );
 }

@@ -1,24 +1,31 @@
 /**
  * Annotation editor.
  *
- * Shows a read-only 5-line quote block at the top (already resolved by the
- * caller from file content), then a textarea for the markdown body. On save
- * creates the annotation via /api/annotations.
+ * Shows a quote block at the top (sliced from `sourceLines` at runtime so the
+ * user can grow/shrink the quote with the ± buttons before saving) and a
+ * textarea for the markdown body. On save creates the annotation via
+ * /api/annotations.
  *
- * The quote block is immutable after creation in v1 - if you want to change
- * what code an annotation refers to, delete and recreate.
+ * The chosen quote range is captured at save time. After saving, annotations
+ * are immutable - delete and recreate to change what code is referenced.
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useCreateAnnotation } from '../api/hooks';
+
+const MIN_LINES = 1;
+const MAX_LINES = 20;
+const DEFAULT_LINES = 5;
 
 interface Props {
   hostAlias: string;
   repoPath: string;
   filePath: string;
   side: 'old' | 'new';
-  quotedStartLine: number;
-  quotedLines: string;
+  /** Initial start line (1-based) — user can shift it with the ± buttons. */
+  initialStartLine: number;
+  /** Full source as an array of lines (no trailing newline split). */
+  sourceLines: string[];
   quotedLang: string;
   onClose: () => void;
 }
@@ -28,13 +35,27 @@ export function AnnotationEditor({
   repoPath,
   filePath,
   side,
-  quotedStartLine,
-  quotedLines,
+  initialStartLine,
+  sourceLines,
   quotedLang,
   onClose,
 }: Props) {
   const [body, setBody] = useState('');
+  const [startLine, setStartLine] = useState(() =>
+    Math.max(1, Math.min(initialStartLine, sourceLines.length || 1)),
+  );
+  const [lineCount, setLineCount] = useState(() =>
+    Math.min(DEFAULT_LINES, Math.max(MIN_LINES, sourceLines.length || 1)),
+  );
   const create = useCreateAnnotation();
+
+  const quotedLines = useMemo(() => {
+    const slice = sourceLines.slice(startLine - 1, startLine - 1 + lineCount);
+    while (slice.length < lineCount) slice.push('');
+    return slice.join('\n');
+  }, [sourceLines, startLine, lineCount]);
+
+  const endLine = startLine + lineCount - 1;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +65,7 @@ export function AnnotationEditor({
       repoPath,
       filePath,
       side,
-      quotedStartLine,
+      quotedStartLine: startLine,
       quotedLines,
       quotedLang,
       body,
@@ -60,7 +81,23 @@ export function AnnotationEditor({
     if (e.key === 'Escape') onClose();
   };
 
-  const endLine = quotedStartLine + 4; // always 5 lines
+  const adjustStart = (delta: number) => {
+    setStartLine((s) =>
+      Math.max(
+        1,
+        Math.min((sourceLines.length || 1) - lineCount + 1, s + delta),
+      ),
+    );
+  };
+  const adjustCount = (delta: number) => {
+    setLineCount((c) => {
+      const next = Math.max(MIN_LINES, Math.min(MAX_LINES, c + delta));
+      // Keep the slice within source bounds.
+      const maxStart = Math.max(1, (sourceLines.length || 1) - next + 1);
+      if (startLine > maxStart) setStartLine(maxStart);
+      return next;
+    });
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -75,7 +112,31 @@ export function AnnotationEditor({
         </header>
         <div className="annotation-editor">
           <div className="quote-block-label">
-            {filePath}:{quotedStartLine}-{endLine} ({side})
+            <span>
+              {filePath}:{startLine}-{endLine} ({side})
+            </span>
+            <div className="quote-range-controls" role="group" aria-label="Adjust quote range">
+              <span className="hint">Start</span>
+              <button type="button" onClick={() => adjustStart(-1)} title="Move start up">−</button>
+              <button type="button" onClick={() => adjustStart(1)} title="Move start down">+</button>
+              <span className="hint">Lines {lineCount}</span>
+              <button
+                type="button"
+                onClick={() => adjustCount(-1)}
+                disabled={lineCount <= MIN_LINES}
+                title="Fewer lines"
+              >
+                −
+              </button>
+              <button
+                type="button"
+                onClick={() => adjustCount(1)}
+                disabled={lineCount >= MAX_LINES}
+                title="More lines"
+              >
+                +
+              </button>
+            </div>
           </div>
           <pre className={`quote-block lang-${quotedLang}`}>
             <code>{quotedLines}</code>

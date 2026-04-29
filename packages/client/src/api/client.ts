@@ -57,6 +57,16 @@ export async function api<T>(
   }
   if (!res.ok) {
     const err = toRemoteError(body, text, res.status);
+    // Broadcast so the global ToastProvider can surface unhandled errors.
+    // Callers that handle the error explicitly (e.g. validate-repo flow)
+    // can swallow the toast by catching the ApiError before propagation.
+    try {
+      window.dispatchEvent(
+        new CustomEvent('review-app:api-error', { detail: { message: err.message, kind: err.kind } }),
+      );
+    } catch {
+      // SSR/test env without window — ignore.
+    }
     throw new ApiError(err, res.status);
   }
   return body as T;

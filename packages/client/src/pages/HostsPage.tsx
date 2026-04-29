@@ -9,7 +9,12 @@
  */
 
 import { useState } from 'react';
-import { useHosts, useDeleteHost, useTestHost } from '../api/hooks';
+import {
+  useHosts,
+  useDeleteHost,
+  useTestHost,
+  useRecentReposAll,
+} from '../api/hooks';
 import { navigate } from '../routes';
 import { AddHostModal } from '../components/AddHostModal';
 import { PassphraseModal } from '../components/PassphraseModal';
@@ -17,8 +22,12 @@ import type { HostConfig } from '@shared/types';
 
 export function HostsPage() {
   const { data, isLoading } = useHosts();
+  const recentAll = useRecentReposAll();
   const [showAdd, setShowAdd] = useState(false);
   const [passphraseFor, setPassphraseFor] = useState<HostConfig | null>(null);
+  // When set, after the passphrase modal succeeds we navigate straight to
+  // this repo's review page instead of dropping the user on the repo picker.
+  const [pendingRepoPath, setPendingRepoPath] = useState<string | null>(null);
   const deleteHost = useDeleteHost();
 
   if (isLoading) return <div className="page loading">Loading...</div>;
@@ -30,16 +39,32 @@ export function HostsPage() {
 
   const open = (host: HostConfig) => {
     if (needsCredential(host) && !credentialLoaded.has(host.alias)) {
+      setPendingRepoPath(null);
       setPassphraseFor(host);
       return;
     }
     navigate({ view: 'repo-picker', hostAlias: host.alias });
   };
 
+  const openRecent = (hostAlias: string, repoPath: string) => {
+    const host = hosts.find((h) => h.alias === hostAlias);
+    if (!host) return;
+    if (needsCredential(host) && !credentialLoaded.has(host.alias)) {
+      // Remember the target so we can resume the user's intent after they
+      // unlock the host instead of dumping them on the repo picker.
+      setPendingRepoPath(repoPath);
+      setPassphraseFor(host);
+      return;
+    }
+    navigate({ view: 'review', hostAlias, repoPath });
+  };
+
+  const recents = recentAll.data?.recent ?? [];
+
   return (
     <div className="page">
       <header className="page-header">
-        <h1>Hosts</h1>
+        <h1>review-app</h1>
         <div className="page-header-actions">
           <button
             className="btn-link"
@@ -53,39 +78,70 @@ export function HostsPage() {
         </div>
       </header>
 
-      {hosts.length === 0 ? (
-        <div className="empty-state">
-          <p>No hosts configured yet.</p>
-          <button className="btn-primary" onClick={() => setShowAdd(true)}>
-            Add your first host
-          </button>
-        </div>
-      ) : (
-        <ul className="host-list">
-          {hosts.map((h) => (
-            <HostCard
-              key={h.alias}
-              host={h}
-              onOpen={() => open(h)}
-              onDelete={() => {
-                if (confirm(`Delete host "${h.alias}"?`)) {
-                  deleteHost.mutate(h.alias);
-                }
-              }}
-            />
-          ))}
-        </ul>
+      {recents.length > 0 && (
+        <section className="recent-repos recent-repos-global">
+          <h2>Recent repositories</h2>
+          <ul>
+            {recents.map((r) => (
+              <li key={`${r.hostAlias}::${r.path}`}>
+                <button onClick={() => openRecent(r.hostAlias, r.path)}>
+                  <code>{r.path}</code>
+                  <span className="recent-host">{r.hostAlias}</span>
+                  <span className="recent-time">
+                    {new Date(r.lastOpenedAt).toLocaleDateString()}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
+
+      <section className="hosts-section">
+        <h2>Hosts</h2>
+        {hosts.length === 0 ? (
+          <div className="empty-state">
+            <p>No hosts configured yet.</p>
+            <button className="btn-primary" onClick={() => setShowAdd(true)}>
+              Add your first host
+            </button>
+          </div>
+        ) : (
+          <ul className="host-list">
+            {hosts.map((h) => (
+              <HostCard
+                key={h.alias}
+                host={h}
+                onOpen={() => open(h)}
+                onDelete={() => {
+                  if (confirm(`Delete host "${h.alias}"?`)) {
+                    deleteHost.mutate(h.alias);
+                  }
+                }}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
 
       {showAdd && <AddHostModal onClose={() => setShowAdd(false)} />}
       {passphraseFor && (
         <PassphraseModal
           host={passphraseFor}
-          onClose={() => setPassphraseFor(null)}
+          onClose={() => {
+            setPassphraseFor(null);
+            setPendingRepoPath(null);
+          }}
           onSubmitted={() => {
             const h = passphraseFor;
+            const repo = pendingRepoPath;
             setPassphraseFor(null);
-            navigate({ view: 'repo-picker', hostAlias: h.alias });
+            setPendingRepoPath(null);
+            if (repo) {
+              navigate({ view: 'review', hostAlias: h.alias, repoPath: repo });
+            } else {
+              navigate({ view: 'repo-picker', hostAlias: h.alias });
+            }
           }}
         />
       )}

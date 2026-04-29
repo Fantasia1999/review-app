@@ -212,7 +212,12 @@ packages/
 
 The user said "朴素做法就可以" — the simplest thing that works. So:
 
-- We do NOT read `~/.ssh/config`.
+- We do NOT read `~/.ssh/config` *for connecting*. Connections still
+  use the explicit fields the user enters in "Add host". As a UX-only
+  convenience, the Add Host modal can *import* fields from
+  `~/.ssh/config` (Host/HostName/User/Port/IdentityFile) so the user
+  doesn't have to retype them — this is a one-shot prefill, not a
+  runtime resolver, and wildcard `Host *` patterns are skipped.
 - We do NOT consult ssh-agent (Windows or unix).
 - We do NOT support ProxyJump, Pageant, 1Password agent, hardware tokens.
 - We DO scan `~/.ssh/` for files matching `id_(rsa|ed25519|ecdsa|dsa)`
@@ -438,20 +443,21 @@ When perf regresses, look at:
 | `shared/types.ts`              | ✅ complete  | All cross-boundary types defined      |
 | `agent/remote/`                | ✅ complete  | SSH executor + pool, idle reaping     |
 | `agent/git/ops.ts`             | ✅ complete  | All v1 ops + porcelain v2 parsing     |
-| `agent/config/`                | ✅ complete  | Store + key scanner                    |
+| `agent/config/`                | ✅ complete  | Store + key scanner + ssh-config import |
 | `agent/db/`                    | ✅ complete  | Schema + CRUD                          |
-| `agent/routes/`                | ✅ complete  | All six route modules                  |
-| `agent/index.ts`               | ✅ complete  | Entry, port binding, browser open     |
+| `agent/routes/`                | ✅ complete  | All route modules + recent-all/disconnect/ssh-config |
+| `agent/index.ts`               | ✅ complete  | Entry, port binding, browser open, **CLI path arg**, implicit local host |
 | `agent/static.ts`              | ⚠️ dev-mode  | Production embedding TBD (see §10.4)  |
 | `client/api/`                  | ✅ complete  | All hooks defined                     |
 | `client/routes.tsx`            | ✅ complete  | Hash-based, three views               |
-| `client/pages/`                | ✅ complete  | Hosts, RepoPicker, Review             |
-| `client/components/`           | ✅ complete  | All 7 components written              |
+| `client/pages/`                | ✅ complete  | Hosts (with cross-host recents), RepoPicker, Review |
+| `client/components/`           | ✅ complete  | + Toast, HelpOverlay; AnnotationEditor with adjustable quote range |
 | `client/styles.css`            | ✅ complete  | Single file, light + dark             |
 | `DiffView.tsx`                 | ⚠️ unverified| `@pierre/diffs` props not runtime-tested |
-| Tests                          | ❌ none      | Add when first bug bites              |
-| `bun install`                  | ❌ not run   | Lockfile not in skeleton              |
-| Type checking                  | ❌ not run   | Run `bun run typecheck` after install |
+| Tests                          | ✅ baseline  | Agent + client unit tests, run with `bun run test` |
+| Keyboard shortcuts             | ✅ complete  | r/j/k/c/y/? + Esc; help overlay        |
+| Toasts + global error bus      | ✅ complete  | `review-app:api-error` window event     |
+| Reconnect on SSH failure       | ✅ complete  | `POST /api/hosts/:alias/disconnect`    |
 
 ---
 
@@ -487,11 +493,13 @@ The third bullet is a small build script — see `scripts/embed-assets.ts`
 
 ### 10.3 Initial UX: empty state guidance
 
-When `~/.review-app/config.json` doesn't exist (first run), the user
-sees an empty Hosts page with a single "Add your first host" button.
-Consider replacing this with a guided onboarding flow: detect that no
-hosts exist + no SSH keys in `~/.ssh/`, and show a "Set up SSH first"
-explainer with a link to `ssh-keygen` docs.
+**Resolved (partial)**: First run now seeds an implicit `local-machine`
+host (see `ensureLocalHost()` in `agent/config/store.ts`). Users can
+also launch `review-app <path>` to skip host setup entirely — the agent
+resolves the path against the local host and opens the review URL
+directly. The remaining future work here is a guided "no SSH keys
+detected" flow for users who want to add a remote host on a fresh
+machine.
 
 ### 10.4 Concurrent diff fetches
 
@@ -549,9 +557,10 @@ this" notes separate from "TIL this exists" notes.
 
 ### 11.4 Keyboard-first power mode
 
-Right now `j/k` and `r` work. Add: `c` for create-annotation on
-selection, `x` for mark-read, `/` for fuzzy file search, `?` for help.
-This is what makes the tool feel like a vim plugin instead of a webapp.
+**Mostly done.** Currently implemented: `j/k` (next/prev file), `r`
+(refresh), `c` (annotate current file), `y` (copy all annotations),
+`?` (help overlay), Esc (close modals). Remaining future work: `x`
+for mark-read on the current file, `/` for fuzzy file search.
 
 ### 11.5 Integration with AI coding agents (beyond clipboard)
 

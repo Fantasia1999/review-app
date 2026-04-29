@@ -13,7 +13,7 @@
  *   c     - create annotation on currently selected lines (handled in DiffView)
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   useChanges,
   useAnnotations,
@@ -22,12 +22,15 @@ import {
   usePrefs,
   useUpdatePrefs,
   useClearRepoAnnotations,
+  useDisconnectHost,
 } from '../api/hooks';
 import { navigate } from '../routes';
 import { FileTree } from '../components/FileTree';
 import { DiffView } from '../components/DiffView';
 import { AnnotationSidebar } from '../components/AnnotationSidebar';
 import { CopyAllButton } from '../components/CopyAllButton';
+import { HelpOverlay } from '../components/HelpOverlay';
+import { useToast } from '../components/Toast';
 import type { FileChange } from '@shared/types';
 
 export function ReviewPage({
@@ -48,6 +51,16 @@ export function ReviewPage({
   const clearAll = useClearRepoAnnotations();
 
   const layout = prefs.data?.prefs.annotationLayout ?? 'inline';
+  const disconnect = useDisconnectHost();
+  const toast = useToast();
+  const [showHelp, setShowHelp] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  // Tick once a second to keep "last refreshed Ns ago" current.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Default-select first file if none specified
   const selectedFile = useMemo<FileChange | undefined>(() => {
@@ -77,6 +90,13 @@ export function ReviewPage({
       const t = e.target as HTMLElement;
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
 
+      if (e.key === '?') {
+        e.preventDefault();
+        setShowHelp((s) => !s);
+        return;
+      }
+      if (showHelp) return; // pause other shortcuts while help is up
+
       if (e.key === 'r') {
         changes.refetch();
       } else if (e.key === 'j' || e.key === 'k') {
@@ -87,17 +107,29 @@ export function ReviewPage({
         if (target) {
           navigate({ view: 'review', hostAlias, repoPath, filePath: target.path });
         }
+      } else if (e.key === 'c') {
+        // Trigger annotation on current file. DiffView listens for this event.
+        if (selectedFile) {
+          window.dispatchEvent(
+            new CustomEvent('review-app:annotate-current', {
+              detail: { filePath: selectedFile.path },
+            }),
+          );
+        }
+      } else if (e.key === 'y') {
+        window.dispatchEvent(new CustomEvent('review-app:copy-all'));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [changes, selectedFile, hostAlias, repoPath]);
+  }, [changes, selectedFile, hostAlias, repoPath, showHelp]);
 
   if (changes.isLoading) {
     return <div className="page loading">Loading changes…</div>;
   }
   if (changes.error) {
     const err = changes.error as Error & { info?: { message: string; stderr?: string; kind: string } };
+    const isSsh = (err.info?.kind ?? '').startsWith('ssh_');
     return (
       <div className="page">
         <header className="page-header">
@@ -108,6 +140,24 @@ export function ReviewPage({
         <div className="error-box">
           <strong>{err.info?.kind ?? 'error'}:</strong> {err.message}
           {err.info?.stderr && <pre className="stderr">{err.info.stderr}</pre>}
+          <div className="error-actions">
+            <button onClick={() => changes.refetch()}>Retry</button>
+            {isSsh && (
+              <button
+                onClick={async () => {
+                  try {
+                    await disconnect.mutateAsync(hostAlias);
+                    toast.show({ kind: 'info', message: 'Reconnecting…' });
+                    changes.refetch();
+                  } catch {
+                    /* toast handled globally */
+                  }
+                }}
+              >
+                Reconnect
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -136,6 +186,11 @@ export function ReviewPage({
           <button onClick={() => changes.refetch()} disabled={changes.isFetching}>
             {changes.isFetching ? 'Refreshing…' : 'Refresh (r)'}
           </button>
+          <div className="freshness" title="Time since last successful fetch">
+            {changes.dataUpdatedAt
+              ? `Updated ${formatAgo(now - changes.dataUpdatedAt)}`
+              : ''}
+          </div>
         </div>
         {summary.files.length === 0 ? (
           <div className="empty-state-small">No changes in working tree</div>
@@ -159,6 +214,20 @@ export function ReviewPage({
             {selectedFile ? selectedFile.path : 'Select a file'}
           </div>
           <div className="review-main-actions">
+            <button
+              className="btn-link"
+              onClick={() => navigate({ view: 'comments' })}
+              title="Manage comments across repos"
+            >
+              Manage comments
+            </button>
+            <button
+              className="btn-link"
+              onClick={() => setShowHelp(true)}
+              title="Keyboard shortcuts (?)"
+            >
+              ?
+            </button>
             <button
               onClick={() =>
                 updatePrefs.mutate({
@@ -232,8 +301,20 @@ export function ReviewPage({
           />
         )}
       </main>
+      {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
     </div>
   );
+}
+
+function formatAgo(ms: number): string {
+  if (ms < 0 || !Number.isFinite(ms)) return 'just now';
+  const s = Math.round(ms / 1000);
+  if (s < 5) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return `${h}h ago`;
 }
 
 function countAnnotationsByFile(

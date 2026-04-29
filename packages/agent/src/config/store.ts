@@ -42,6 +42,29 @@ export async function ensureConfigDir(): Promise<void> {
   await mkdir(configDir(), { recursive: true });
 }
 
+/**
+ * Ensure an implicit "local-machine" host exists if no hosts are configured.
+ *
+ * First-run UX: a fresh user shouldn't have to "add a host" just to look at
+ * a local repo. We pre-seed a local host so the landing page can show recent
+ * repos directly. Idempotent — does nothing if any host already exists.
+ *
+ * Returns the alias of the implicit local host so callers can target it.
+ */
+export const IMPLICIT_LOCAL_ALIAS = 'local-machine';
+
+export async function ensureLocalHost(): Promise<string> {
+  const cfg = await loadConfig();
+  if (cfg.hosts.length > 0) {
+    const local = cfg.hosts.find((h) => h.kind === 'local');
+    return local?.alias ?? cfg.hosts[0].alias;
+  }
+  await updateConfig((c) => {
+    c.hosts.push({ alias: IMPLICIT_LOCAL_ALIAS, kind: 'local' });
+  });
+  return IMPLICIT_LOCAL_ALIAS;
+}
+
 export async function loadConfig(): Promise<AppConfig> {
   if (cached) return cached;
   await ensureConfigDir();

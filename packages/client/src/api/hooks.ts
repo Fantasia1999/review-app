@@ -112,6 +112,38 @@ export function useTestHost() {
   });
 }
 
+/** Drop the live pooled connection (e.g. SSH socket) for a host. */
+export function useDisconnectHost() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (alias: string) =>
+      apiPost<{ ok: true }>(
+        `/api/hosts/${encodeURIComponent(alias)}/disconnect`,
+        {},
+      ),
+    onSuccess: (_, alias) => {
+      qc.invalidateQueries({ queryKey: ['hosts'] });
+      qc.invalidateQueries({ queryKey: ['changes', alias] });
+    },
+  });
+}
+
+/** Parsed entries from ~/.ssh/config — purely a UX hint for AddHostModal. */
+export interface SshConfigEntryDTO {
+  alias: string;
+  hostname: string;
+  user?: string;
+  port?: number;
+  keyPath?: string;
+}
+export function useSshConfig() {
+  return useQuery({
+    queryKey: ['hosts', 'ssh-config'],
+    queryFn: () => api<{ entries: SshConfigEntryDTO[] }>('/api/hosts/ssh-config'),
+    staleTime: 5 * 60_000,
+  });
+}
+
 // ---------- repos ----------
 
 export function useRecentRepos(alias: string | undefined) {
@@ -122,6 +154,18 @@ export function useRecentRepos(alias: string | undefined) {
         `/api/repos/${encodeURIComponent(alias!)}/recent`,
       ),
     enabled: !!alias,
+  });
+}
+
+/** Cross-host recents for the landing page. */
+export function useRecentReposAll() {
+  return useQuery({
+    queryKey: ['repos', 'recent-all'],
+    queryFn: () =>
+      api<{
+        recent: { hostAlias: string; path: string; lastOpenedAt: number }[];
+      }>(`/api/repos/recent-all`),
+    staleTime: 30_000,
   });
 }
 

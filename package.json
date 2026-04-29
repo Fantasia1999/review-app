@@ -10,7 +10,7 @@
     "dev": "bun run --filter '*' dev",
     "dev:agent": "bun run --filter @review-app/agent dev",
     "dev:client": "bun run --filter @review-app/client dev",
-    "build": "bun run --filter client build && bun run --filter agent build",
+    "build": "bun run build:client && bun run build:agent",
     "build:client": "bun run --filter @review-app/client build",
     "build:agent": "bun run --filter @review-app/agent build",
     "embed": "bun run scripts/embed-assets.ts",

@@ -108,24 +108,50 @@ Move/sync these files manually if you want to share state across machines.
 
 ## How to use it
 
-1. Run the binary. Browser opens to the host list.
-2. Click "Add host". Choose either:
+The fastest path for a local repo is one shell command:
+
+```bash
+review-app .             # open the current directory
+review-app ~/code/myrepo # or any absolute / ~-relative path
+```
+
+The agent resolves the path, spins up an implicit `local-machine` host
+on first run, and opens the review screen directly in your browser.
+
+If you start the agent without a path argument, the browser opens on
+the host list:
+
+1. Run the binary. Browser opens to the host list. Recently-opened
+   repositories from any host appear at the top — click to jump back in.
+2. To add a remote, click "Add host". Choose either:
    - **Local machine** for a repo on your own disk
    - **WSL (Windows)** to run git inside a WSL distro on this machine
-   - **SSH host** with either private-key auth or password auth
+   - **SSH host** with either private-key auth or password auth.
+     For SSH you can paste a `ssh user@host[:port]` shorthand to
+     auto-fill the connection fields, or import an entry from your
+     `~/.ssh/config`.
 3. Click your host. If the SSH host needs a password or key passphrase,
    enter it when prompted.
-4. Type an absolute repo path (for example `C:\code\myproject` locally or
-   `/home/me/code/myproject` on a remote host).
-   Hit Enter. The path is validated as a git work tree before opening.
+4. Type an absolute repo path (for example `C:\code\myproject` locally
+   or `/home/me/code/myproject` on a remote host). Hit Enter — the path
+   is validated as a git work tree before opening.
 5. Browse files in the left tree. Click any line in the diff to attach
-   a 5-line quoted annotation.
-6. When done, click "Copy all" at the top — paste into your AI agent.
+   a quoted annotation. The editor lets you grow or shrink the quoted
+   range (1–20 lines) before saving.
+6. When done, press `y` (or click "Copy all") to copy every annotation
+   as LLM-friendly markdown — paste into your AI agent.
+
+If an SSH connection drops mid-review, the error screen shows a
+**Reconnect** button that drops the pooled socket and retries.
 
 ### Keyboard shortcuts (in review screen)
 
 - `r` — refresh diff
 - `j` / `k` — next / previous file
+- `c` — annotate the current file
+- `y` — copy all annotations
+- `?` — show keyboard help
+- `Esc` — close annotation editor / help
 
 ## Project structure
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Routes } from './routes';
+import { ToastProvider } from './components/Toast';
 import './styles.css';
 
 const queryClient = new QueryClient({
@@ -15,7 +16,9 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <Routes />
+      <ToastProvider>
+        <Routes />
+      </ToastProvider>
     </QueryClientProvider>
   );
 }

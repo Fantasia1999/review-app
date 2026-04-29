@@ -6,14 +6,17 @@
  * PUT  /api/hosts/:alias           - edit existing host
  * DELETE /api/hosts/:alias         - remove host (also disconnects)
  * GET  /api/hosts/keys             - scan ~/.ssh/ for available private keys
+ * GET  /api/hosts/ssh-config       - parse ~/.ssh/config and list aliases
  * POST /api/hosts/:alias/passphrase - submit passphrase for an encrypted key
  * POST /api/hosts/:alias/password   - submit password for a password-auth SSH host
  * POST /api/hosts/:alias/test      - test connection (lightweight `echo ok`)
+ * POST /api/hosts/:alias/disconnect - drop pooled connection (Reconnect button)
  */
 
 import { Hono } from 'hono';
 import { loadConfig, updateConfig } from '../config/store';
 import { detectEncrypted, scanLocalKeys } from '../config/keys';
+import { readSshConfig } from '../config/ssh-config';
 import type { ExecutorPool } from '../remote/pool';
 import { RemoteExecError } from '../remote/executor';
 import { listWslDistros } from '../remote/wsl-executor';
@@ -43,6 +46,15 @@ export function hostsRoutes(pool: ExecutorPool) {
   r.get('/keys', async (c) => {
     const keys = await scanLocalKeys();
     return c.json({ keys });
+  });
+
+  r.get('/ssh-config', async (c) => {
+    // Read-only view of ~/.ssh/config so the AddHostModal can offer
+    // one-click import of an existing alias. We do NOT use these entries
+    // to actually connect — see DESIGN §4.1 for why ssh_config isn't on
+    // the default connect path.
+    const entries = await readSshConfig();
+    return c.json({ entries });
   });
 
   r.get('/wsl-distros', async (c) => {
@@ -145,6 +157,16 @@ export function hostsRoutes(pool: ExecutorPool) {
         200,
       );
     }
+  });
+
+  r.post('/:alias/disconnect', async (c) => {
+    // Force-drop a pooled SSH/WSL/local connection. Used by the Reconnect
+    // affordance on the review page when SSH errors out mid-session, so the
+    // user doesn't have to navigate back to the hosts list to recover.
+    // Credentials in memory are preserved — only the live connection drops.
+    const alias = c.req.param('alias');
+    await pool.disconnect(alias);
+    return c.json({ ok: true });
   });
 
   return r;

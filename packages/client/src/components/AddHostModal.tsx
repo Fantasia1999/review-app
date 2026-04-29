@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import type { CreateHostInput } from '@shared/types';
-import { useAddHost, useLocalKeys, useWslDistros } from '../api/hooks';
+import {
+  useAddHost,
+  useLocalKeys,
+  useWslDistros,
+  useSshConfig,
+} from '../api/hooks';
 import { ApiError } from '../api/client';
 
 export function AddHostModal({ onClose }: { onClose: () => void }) {
@@ -14,8 +19,12 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
   const [password, setPassword] = useState('');
   const [customKey, setCustomKey] = useState(false);
   const [distro, setDistro] = useState('');
+  const [shorthand, setShorthand] = useState('');
+  const [shorthandErr, setShorthandErr] = useState<string | null>(null);
+  const [importAlias, setImportAlias] = useState('');
   const keys = useLocalKeys();
   const wsl = useWslDistros();
+  const sshConfig = useSshConfig();
   const addHost = useAddHost();
   const [aliasErr, setAliasErr] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -24,6 +33,54 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
   const isWsl = kind === 'wsl';
   const isPassword = kind === 'ssh' && auth === 'password';
   const isKey = kind === 'ssh' && auth === 'key';
+
+  // Parse `[ssh ]user@host[:port]` and fill the SSH fields. Saves the user
+  // 3 separate field-fills when they already know the connection string.
+  const applyShorthand = () => {
+    setShorthandErr(null);
+    const trimmed = shorthand.trim().replace(/^ssh\s+/i, '');
+    if (!trimmed) {
+      setShorthandErr('Enter something like user@host or user@host:2222');
+      return;
+    }
+    const at = trimmed.indexOf('@');
+    if (at <= 0) {
+      setShorthandErr('Expected user@host');
+      return;
+    }
+    const u = trimmed.slice(0, at);
+    let rest = trimmed.slice(at + 1);
+    let p = 22;
+    const colon = rest.lastIndexOf(':');
+    if (colon > -1 && /^\d+$/.test(rest.slice(colon + 1))) {
+      p = Number(rest.slice(colon + 1));
+      rest = rest.slice(0, colon);
+    }
+    if (!rest) {
+      setShorthandErr('Missing hostname');
+      return;
+    }
+    setUser(u);
+    setHostname(rest);
+    setPort(p);
+    if (!alias) setAlias(rest);
+  };
+
+  // Import a parsed entry from ~/.ssh/config — fills hostname/user/port/key.
+  const applyImport = (target: string) => {
+    setImportAlias(target);
+    if (!target) return;
+    const entry = sshConfig.data?.entries.find((e) => e.alias === target);
+    if (!entry) return;
+    setHostname(entry.hostname);
+    if (entry.user) setUser(entry.user);
+    if (entry.port) setPort(entry.port);
+    if (entry.keyPath) {
+      setCustomKey(true);
+      setKeyPath(entry.keyPath);
+    }
+    if (!alias) setAlias(entry.alias);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,6 +171,48 @@ export function AddHostModal({ onClose }: { onClose: () => void }) {
 
           {!isLocal && !isWsl && (
             <>
+              <fieldset className="ssh-shortcuts">
+                <legend>Quick fill</legend>
+                <div className="row shorthand-row">
+                  <input
+                    type="text"
+                    value={shorthand}
+                    onChange={(e) => setShorthand(e.target.value)}
+                    placeholder="ssh user@host:port"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        applyShorthand();
+                      }
+                    }}
+                  />
+                  <button type="button" onClick={applyShorthand}>
+                    Parse
+                  </button>
+                </div>
+                {shorthandErr && (
+                  <div className="field-error">{shorthandErr}</div>
+                )}
+                {sshConfig.data && sshConfig.data.entries.length > 0 && (
+                  <label className="import-row">
+                    Import from ~/.ssh/config
+                    <select
+                      value={importAlias}
+                      onChange={(e) => applyImport(e.target.value)}
+                    >
+                      <option value="">Select an entry…</option>
+                      {sshConfig.data.entries.map((e) => (
+                        <option key={e.alias} value={e.alias}>
+                          {e.alias}
+                          {e.hostname !== e.alias ? ` → ${e.hostname}` : ''}
+                          {e.user ? ` (${e.user})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </fieldset>
+
               <label>
                 Hostname
                 <input

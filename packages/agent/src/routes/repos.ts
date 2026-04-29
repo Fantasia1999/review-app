@@ -1,9 +1,10 @@
 /**
  * Repo discovery & history.
  *
- * GET  /api/repos/:alias/recent     - recent repos for this host
- * POST /api/repos/:alias/validate   - check if a path is a git work tree
- * POST /api/repos/:alias/touch      - bump a repo to top of recent list
+ * GET  /api/repos/recent-all       - cross-host recents (landing page)
+ * GET  /api/repos/:alias/recent    - recent repos for one host
+ * POST /api/repos/:alias/validate  - check if a path is a git work tree
+ * POST /api/repos/:alias/touch     - bump a repo to top of recent list
  */
 
 import { Hono } from 'hono';
@@ -14,6 +15,20 @@ import { RemoteExecError } from '../remote/executor';
 
 export function reposRoutes(pool: ExecutorPool) {
   const r = new Hono();
+
+  r.get('/recent-all', async (c) => {
+    // Cross-host listing for the landing page — flattened and sorted by
+    // most-recently opened. Registered before `/:alias/recent` so the
+    // literal "recent-all" segment doesn't get matched as an alias.
+    const cfg = await loadConfig();
+    const flat: { hostAlias: string; path: string; lastOpenedAt: number }[] = [];
+    for (const [hostAlias, list] of Object.entries(cfg.recentRepos)) {
+      if (!cfg.hosts.find((h) => h.alias === hostAlias)) continue;
+      for (const e of list) flat.push({ hostAlias, path: e.path, lastOpenedAt: e.lastOpenedAt });
+    }
+    flat.sort((a, b) => b.lastOpenedAt - a.lastOpenedAt);
+    return c.json({ recent: flat.slice(0, 20) });
+  });
 
   r.get('/:alias/recent', async (c) => {
     const alias = c.req.param('alias');
