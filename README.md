@@ -38,12 +38,30 @@ git clone <this repo>
 cd review-app
 bun install
 
+# One command on Windows, macOS, or Linux:
+# builds the app, starts the agent, and opens the browser.
+bun run local
+```
+
+The local script serves the built client from the agent process, so you do not
+need to keep a separate Vite dev server running. You can also pass a repo path:
+
+```bash
+bun run local -- .
+bun run local -- ~/code/myrepo
+```
+
+For active frontend/backend development, you can still run the two watch
+processes manually:
+
+```bash
 # Two terminals:
 bun run dev:agent    # starts agent on http://127.0.0.1:7676
 bun run dev:client   # starts Vite dev server on http://127.0.0.1:5173
 ```
 
-Open http://127.0.0.1:5173 — Vite proxies `/api` to the agent.
+For the manual dev setup, open http://127.0.0.1:5173 — Vite proxies `/api`
+to the agent.
 
 ### Port already in use
 
