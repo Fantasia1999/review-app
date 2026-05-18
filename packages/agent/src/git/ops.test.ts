@@ -54,6 +54,12 @@ describe('parsePorcelainV2', () => {
     ]);
   });
 
+  it('ignores untracked embedded repos without dropping parent untracked files', () => {
+    const out = '? nested-repo/\0? normal-dir/newfile.txt\0? root-new.txt\0';
+    const r = parsePorcelainV2(out);
+    expect(r.map((f) => f.path)).toEqual(['normal-dir/newfile.txt', 'root-new.txt']);
+  });
+
   it('parses renamed (2) entries with both paths', () => {
     const out = '2 R. N... 100644 100644 100644 abc def R100 newpath.ts\0oldpath.ts\0';
     const r = parsePorcelainV2(out);

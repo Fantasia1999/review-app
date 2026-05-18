@@ -305,8 +305,14 @@ export function parsePorcelainV2(out: string): FileChange[] {
         binary: false,
       });
     } else if (line.startsWith('? ')) {
+      const path = line.slice(2);
+      // With --untracked-files=all, Git reports files inside normal untracked
+      // directories individually. A trailing slash here represents an
+      // embedded repository boundary, which should not be reviewed as part of
+      // the parent repo.
+      if (path.endsWith('/')) continue;
       files.push({
-        path: line.slice(2),
+        path,
         status: 'untracked',
         additions: 0,
         deletions: 0,
